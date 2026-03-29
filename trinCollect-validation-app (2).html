@@ -663,14 +663,14 @@ async function loadPDFviaGraph(lien){
     if(!tok)throw new Error('Token manquant');
     // Extraire le chemin du fichier depuis l URL SharePoint
     const urlObj=new URL(lien);
-    // Extraire uniquement le chemin relatif au drive (après /sites/NomSite/)
+    // Utiliser le Drive ID directement + chemin relatif après le nom du site
     const fullPath=decodeURIComponent(urlObj.pathname);
-    // fullPath = /sites/FacturesFournisseurs/Documents partages/Factures/xxx.pdf
-    // On garde uniquement ce qui vient après le 3ème slash (/sites/NomSite/)
     const parts=fullPath.split('/');
-    // parts = ['', 'sites', 'FacturesFournisseurs', 'Documents partages', 'Factures', 'xxx.pdf']
-    const drivePath='/'+parts.slice(3).join('/');
-    const graphUrl=`https://graph.microsoft.com/v1.0/sites/${cfg.sid}/drive/root:${drivePath}:/content`;
+    // parts = ['','sites','FacturesFournisseurs','Documents partages','Factures','xxx.pdf']
+    const drivePath=parts.slice(3).join('/');
+    // Drive ID fixe du tenant Tri'n'Collect
+    const driveId='dbe32566-79f0-401c-a3f8-1a1a46a8463d';
+    const graphUrl=`https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${drivePath}:/content`;
     const res=await fetch(graphUrl,{headers:{Authorization:`Bearer ${tok}`}});
     if(!res.ok)throw new Error(`Graph API: HTTP ${res.status}`);
     const blob=await res.blob();
