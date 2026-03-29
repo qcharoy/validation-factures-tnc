@@ -427,17 +427,17 @@ function initMsal(){
 async function login(){
   if(!msalApp)initMsal();
   try{
-    const r=await msalApp.loginPopup({scopes:['Sites.Read.All','Sites.ReadWrite.All','User.Read'],prompt:'select_account'});
-    account=r.account; onAuth();
-  }catch(e){console.error(e);toast('⚠️ Connexion échouée ou annulée','err')}
+    await msalApp.loginRedirect({scopes:['Sites.Read.All','Sites.ReadWrite.All','User.Read'],prompt:'select_account'});
+  }catch(e){console.error(e);toast('⚠️ Connexion échouée','err')}
 }
 async function getToken(){
   if(!msalApp||!account)throw new Error('Non connecté');
   try{const r=await msalApp.acquireTokenSilent({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account});return r.accessToken;}
-  catch(e){const r=await msalApp.acquireTokenPopup({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account});return r.accessToken;}
+  catch(e){await msalApp.acquireTokenRedirect({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account});return '';}
 }
 async function gGet(path){
   const tok=await getToken();
+  if(!tok)return {};
   const res=await fetch(`https://graph.microsoft.com/v1.0${path}`,{headers:{Authorization:`Bearer ${tok}`}});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${res.status}`);}
   return res.json();
@@ -452,12 +452,12 @@ function onAuth(){
   loadData();
 }
 initMsal();
-msalApp.handleRedirectPromise().catch(()=>{});
-window.addEventListener('load',()=>{
-  if(!msalApp)return;
+// Gérer le retour après redirection Microsoft
+msalApp.handleRedirectPromise().then(resp=>{
+  if(resp&&resp.account){account=resp.account;onAuth();return;}
   const acc=msalApp.getAllAccounts();
   if(acc.length){account=acc[0];onAuth();}
-});
+}).catch(e=>console.error('Redirect error:',e));
 
 // ══ STATE ════════════════════════════════════════════════════
 let rows=[],etabs=[],cmts={},curV='av',curF=null,sCol='DateFacture',sDir=-1;
@@ -815,4 +815,3 @@ setInterval(()=>{if(account)loadData();},120000);
 </script>
 </body>
 </html>
-
