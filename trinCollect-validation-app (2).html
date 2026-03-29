@@ -261,6 +261,23 @@ td.mono{font-family:var(--mono);font-size:12px}
 .cp-save-all{background:var(--green);color:white;border:none;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;font-family:var(--font);cursor:pointer;display:flex;align-items:center;gap:6px;transition:background .15s}
 .cp-save-all:hover{background:#176039}
 .cp-save-all:disabled{opacity:.5;cursor:not-allowed}
+
+/* AUTOCOMPLETE PLAN COMPTABLE */
+.cp-ac-wrap{position:relative;display:inline-block}
+.cp-ac-input{width:110px;border:1px solid var(--g200);border-radius:5px;padding:4px 7px;font-size:12px;font-family:var(--mono);color:var(--g800);background:white;outline:none;transition:border-color .15s}
+.cp-ac-input:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(30,122,74,.12)}
+.cp-ac-input.dirty{border-color:var(--orange);background:var(--obg)}
+.cp-ac-input.saved{border-color:var(--green);background:var(--green-l)}
+.cp-ac-drop{position:absolute;top:calc(100% + 3px);left:0;z-index:500;background:white;border:1px solid var(--g200);border-radius:8px;box-shadow:var(--sh-md);min-width:320px;max-width:400px;max-height:220px;overflow-y:auto;display:none}
+.cp-ac-drop.open{display:block}
+.cp-ac-item{padding:7px 11px;cursor:pointer;font-size:12px;display:flex;gap:10px;align-items:baseline;transition:background .1s;border-bottom:1px solid var(--g100)}
+.cp-ac-item:last-child{border-bottom:none}
+.cp-ac-item:hover,.cp-ac-item.active{background:var(--green-l)}
+.cp-ac-code{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--green);flex-shrink:0;min-width:56px}
+.cp-ac-label{color:var(--g700);line-height:1.3}
+.cp-ac-classe{font-size:10px;color:var(--g400);margin-left:auto;flex-shrink:0}
+.cp-ac-empty{padding:10px 12px;font-size:12px;color:var(--g400);text-align:center}
+.cp-ac-loading{padding:10px 12px;font-size:12px;color:var(--g400);text-align:center}
 </style>
 </head>
 <body>
@@ -397,6 +414,9 @@ td.mono{font-family:var(--mono);font-size:12px}
       <label>ID Liste LignesFacture</label>
       <input id="clli" placeholder="185d9ee3-b6de-4a0d-b6e8-22056923e339">
       <p class="hint">Liste SharePoint contenant les lignes comptables des factures</p>
+      <label>ID Liste PlanComptable</label>
+      <input id="cpci" placeholder="00c81ab2-02a5-4ed3-a14a-6a9a2c0b3e98">
+      <p class="hint">Liste SharePoint du plan comptable (comptes + libellés)</p>
       <label>ID Liste Valideurs</label>
       <input id="cvi" placeholder="ID de la liste Valideurs dans SharePoint">
     </div>
@@ -422,6 +442,7 @@ const cfg={
   get sid()  {return lgs('tnc_sid') ||'trincollect.sharepoint.com,3b306d27-c333-4fc1-9211-9f7889cf8769,d4d129c6-ec9d-4a71-aee3-057c16f2d8b7'},
   get lid()  {return lgs('tnc_lid') ||'bb8a3961-bf41-48d5-88c2-d4a3ece2f945'},
   get llid() {return lgs('tnc_llid')||'185d9ee3-b6de-4a0d-b6e8-22056923e339'},
+  get pcid() {return lgs('tnc_pcid')||'00c81ab2-02a5-4ed3-a14a-6a9a2c0b3e98'},
   get vid()  {return lgs('tnc_vid') ||''},
   get wh()   {return lgs('tnc_wh')  ||'https://tri-n-collect.app.n8n.cloud/webhook/Validation'},
 };
@@ -434,6 +455,7 @@ function openConfig(){
   document.getElementById('csi').value=cfg.sid;
   document.getElementById('cli').value=cfg.lid;
   document.getElementById('clli').value=cfg.llid;
+  document.getElementById('cpci').value=cfg.pcid;
   document.getElementById('cvi').value=cfg.vid;
   document.getElementById('cwh').value=cfg.wh;
   document.getElementById('cfgp').classList.add('open');
@@ -445,6 +467,7 @@ function saveConfig(){
   lss('tnc_sid',document.getElementById('csi').value.trim());
   lss('tnc_lid',document.getElementById('cli').value.trim());
   lss('tnc_llid',document.getElementById('clli').value.trim());
+  lss('tnc_pcid',document.getElementById('cpci').value.trim());
   lss('tnc_vid',document.getElementById('cvi').value.trim());
   lss('tnc_wh', document.getElementById('cwh').value.trim());
   closeConfig(); initMsal(); toast('✅ Config enregistrée','ok');
@@ -887,112 +910,83 @@ function toast(msg,type){const t=document.getElementById('tst');t.textContent=ms
 
 // ══ ONGLET INFOS COMPTABLE ═══════════════════════════════════
 
-// Plan comptable simplifié (extrait de WF1 Code JavaScript1)
-const PLAN_COMPTABLE = {
-  "101000":"Capital","106000":"Réserves","110000":"Report à nouveau","120000":"Résultat de l'exercice",
-  "164000":"Emprunts","200000":"Immobilisations incorporelles","211000":"Terrains","213100":"Constructions - bâtiments",
-  "215400":"Matériel industriel","215500":"Outillage","218200":"Matériel de transport","218300":"Matériel de bureau",
-  "218400":"Mobilier","231000":"Immobilisations en cours","280000":"Amortissements immobilisations incorporelles",
-  "281100":"Amortissements terrains","281300":"Amortissements constructions","281540":"Amortissements matériel industriel",
-  "281820":"Amortissements matériel transport","281830":"Amortissements matériel bureau",
-  "400000":"Fournisseurs","401000":"Fournisseurs","401100":"Fournisseurs - achats courants",
-  "404000":"Fournisseurs d'immobilisations","408000":"Fournisseurs - factures non parvenues",
-  "410000":"Clients","411000":"Clients","416000":"Clients douteux","419000":"Clients créditeurs",
-  "421000":"Personnel - rémunérations","425000":"Personnel - avances et acomptes","431000":"Sécurité sociale",
-  "437000":"Autres organismes sociaux","440000":"État et collectivités","441000":"État - impôts sur bénéfices",
-  "444000":"État - impôts sur les sociétés","445000":"État - TVA","445200":"TVA sur immobilisations",
-  "445300":"TVA à décaisser","445500":"TVA sur achats","445710":"Crédit de TVA",
-  "447000":"Autres impôts et taxes","448000":"État - charges à payer",
-  "455000":"Associés - comptes courants","467000":"Débiteurs et créditeurs divers",
-  "471000":"Comptes d'attente","480000":"Charges constatées d'avance","487000":"Produits constatés d'avance",
-  "512000":"Banques","514000":"Chèques postaux","516000":"Valeurs mobilières de placement","530000":"Caisse",
-  "601000":"Achats de matières premières","602000":"Achats de fournitures","604000":"Achats d'études et prestations",
-  "605000":"Achats de matériels","606000":"Achats non stockés","606100":"Eau et énergie","606110":"Eau",
-  "606120":"Énergie - électricité","606130":"Carburants","606200":"Fournitures de bureau",
-  "606210":"Fournitures administratives","606300":"Fournitures d'entretien","606400":"Fournitures informatiques",
-  "606500":"Fournitures de nettoyage","606600":"Vêtements de travail","606700":"Petits équipements",
-  "606800":"Fournitures diverses","607000":"Achats de marchandises",
-  "611000":"Sous-traitance générale","611100":"Sous-traitance de collecte","611200":"Sous-traitance traitement",
-  "612000":"Redevances de crédit-bail","613000":"Locations","613100":"Loyers immobiliers",
-  "613200":"Locations matériels","613300":"Locations véhicules","614000":"Charges locatives",
-  "615000":"Entretien et réparations","615100":"Entretien bâtiments","615200":"Entretien matériels",
-  "615300":"Entretien véhicules","615400":"Entretien informatique","615500":"Entretien divers",
-  "616000":"Primes d'assurance","616100":"Assurance véhicules","616200":"Assurance bâtiments",
-  "616300":"Multirisque professionnelle","616400":"Assurance RC","616500":"Assurance autres",
-  "617000":"Études et recherches","618000":"Divers","618100":"Documentation","618200":"Conférences et formations",
-  "621000":"Personnel extérieur","621100":"Intérim","621200":"Personnel mis à disposition",
-  "622000":"Rémunérations d'intermédiaires","622100":"Commissions","622200":"Honoraires",
-  "622300":"Frais d'actes et de contentieux","622600":"Études et diagnostics",
-  "623000":"Publicité et relations publiques","623100":"Annonces et insertions","623200":"Catalogues et imprimés",
-  "623300":"Foires et expositions","623400":"Cadeaux clients","624000":"Transport de biens",
-  "624100":"Transport marchandises","624200":"Transport déchets","624300":"Transport courrier",
-  "625000":"Déplacements et réceptions","625100":"Voyages et déplacements","625200":"Repas et réceptions",
-  "625300":"Frais de mission","626000":"Frais postaux et télécommunications","626100":"Affranchissement",
-  "626200":"Téléphone fixe","626300":"Téléphone mobile","626400":"Internet et abonnements numériques",
-  "627000":"Services bancaires","627100":"Frais bancaires","627200":"Cotisations cartes bancaires",
-  "628000":"Divers","628100":"Cotisations professionnelles","628200":"Frais de gardiennage",
-  "628300":"Nettoyage et hygiène","628400":"Blanchisserie","628500":"Frais divers de gestion",
-  "631000":"Impôts et taxes sur rémunérations","633000":"Impôts et taxes","635000":"Autres impôts et taxes",
-  "635100":"Taxe foncière","635200":"CFE","635300":"CVAE","635400":"Taxe sur les véhicules",
-  "641000":"Rémunérations du personnel","641100":"Salaires bruts","641200":"Primes et gratifications",
-  "645000":"Charges de sécurité sociale","645100":"URSSAF","645200":"Retraite complémentaire",
-  "648000":"Autres charges de personnel","651000":"Redevances pour concessions","655000":"Quotes-parts de résultat",
-  "661000":"Charges d'intérêts","664000":"Revenus des valeurs mobilières","665000":"Escomptes accordés",
-  "666000":"Pertes de change","667000":"Charges nettes sur cessions","671000":"Charges exceptionnelles",
-  "681000":"Dotations amortissements","686000":"Dotations provisions financières",
-  "691000":"Participation des salariés","695000":"Impôts sur les bénéfices",
-  "700000":"Ventes de produits","706000":"Prestations de services","706100":"Prestations collecte",
-  "706200":"Prestations traitement","706300":"Prestations valorisation","707000":"Ventes de marchandises",
-  "708000":"Produits des activités annexes","740000":"Subventions d'exploitation",
-  "750000":"Redevances","751000":"Revenus locatifs","758000":"Produits divers",
-  "760000":"Produits financiers","764000":"Revenus valeurs mobilières","775000":"Produits de cessions",
-  "781000":"Reprises amortissements","786000":"Reprises provisions financières"
-};
+// Cache plan comptable (chargé une seule fois depuis SharePoint)
+let planComptable=[];      // [{Compte, Libelle, Classe}]
+let planLoaded=false;
+let planLoading=false;
 
-function getLibelle(compte){
-  if(!compte)return'';
-  const code=String(compte).replace(/\s/g,'');
-  if(PLAN_COMPTABLE[code])return PLAN_COMPTABLE[code];
-  // Recherche par préfixe (6 → 5 → 4 → 3 chiffres)
-  for(let l=6;l>=3;l--){
-    const pref=code.substring(0,l);
-    const match=Object.keys(PLAN_COMPTABLE).find(k=>k.startsWith(pref));
-    if(match)return PLAN_COMPTABLE[match];
-  }
-  return'';
+async function loadPlanComptable(){
+  if(planLoaded||planLoading)return;
+  planLoading=true;
+  try{
+    const flds='Title,Libelle,Classe';
+    let url=`/sites/${cfg.sid}/lists/${cfg.pcid}/items?$expand=fields($select=${flds})&$top=500`;
+    let items=[];
+    while(url){
+      const d=await gGet(url);
+      items=items.concat(d.value||[]);
+      url=d['@odata.nextLink']?d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
+    }
+    planComptable=items.map(it=>({
+      Compte:it.fields?.Title||'',
+      Libelle:it.fields?.Libelle||'',
+      Classe:it.fields?.Classe||''
+    })).filter(c=>c.Compte).sort((a,b)=>a.Compte.localeCompare(b.Compte));
+    planLoaded=true;
+  }catch(e){
+    console.error('loadPlanComptable error:',e);
+    toast('⚠️ Plan comptable non chargé : '+e.message,'err');
+  }finally{planLoading=false;}
+}
+
+function searchPlan(q){
+  if(!q)return[];
+  const s=q.toLowerCase().trim();
+  return planComptable.filter(c=>
+    c.Compte.startsWith(s)||
+    c.Libelle.toLowerCase().includes(s)||
+    c.Classe.toLowerCase().includes(s)
+  ).slice(0,15);
+}
+
+function getLibelleFromPlan(compte){
+  const c=planComptable.find(x=>x.Compte===String(compte).trim());
+  return c?c.Libelle:'';
 }
 
 // État lignes
-let lignesData=[];         // [{_id, _spId, ...fields, _dirty:false}]
+let lignesData=[];
 let lignesLoaded=false;
 let lignesCleUnique='';
+// Dropdown actif
+let acActiveIdx=-1;
+let acActiveRow=-1;
 
 async function loadLignes(){
   const f=curF;if(!f)return;
   const cle=f.CleUnique||'';
-  // Si déjà chargé pour cette facture, ne pas recharger
-  if(lignesLoaded && lignesCleUnique===cle)return;
+  if(lignesLoaded&&lignesCleUnique===cle)return;
 
   lignesLoaded=false;
   lignesCleUnique=cle;
   document.getElementById('lcnt').textContent='…';
   document.getElementById('tcompta').innerHTML=`<div class="cp-loading">⏳ Chargement des lignes comptables…</div>`;
 
+  // Charger plan comptable en parallèle si pas encore fait
+  if(!planLoaded)loadPlanComptable();
+
   try{
     const flds='CleUnique,NumeroLigne,Chantier,AdresseChantier,Designation,Quantite,Unite,PUHT,MontantHT,TVAPct,CompteComptable,LibelleCompte,Cl_x00e9_UniqueLigne,Title';
-    // Chargement de toutes les lignes + filtre côté client (CleUnique non indexé)
-    // On charge par pages de 500 pour couvrir les grosses listes
-    let allItems=[], nextUrl=`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${flds})&$top=500`;
+    let allItems=[],nextUrl=`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${flds})&$top=500`;
     while(nextUrl){
       const data=await gGet(nextUrl);
       allItems=allItems.concat(data.value||[]);
       nextUrl=data['@odata.nextLink']?data['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
     }
-    // Filtre JS : la CleUnique de la ligne doit commencer par la CleUnique de la facture
     lignesData=allItems
       .filter(it=>(it.fields?.CleUnique||'').startsWith(cle))
       .sort((a,b)=>{
-        const na=parseInt(a.fields?.NumeroLigne||0), nb=parseInt(b.fields?.NumeroLigne||0);
+        const na=parseInt(a.fields?.NumeroLigne||0),nb=parseInt(b.fields?.NumeroLigne||0);
         return na-nb;
       })
       .map(it=>({_spId:it.id,...it.fields,_dirty:false}));
@@ -1009,27 +1003,32 @@ async function loadLignes(){
 function rCompta(){
   const el=document.getElementById('tcompta');
   if(!lignesData.length){
-    el.innerHTML=`<div class="cp-empty"><div style="font-size:36px">🧾</div><div style="font-size:14px;font-weight:500;color:var(--g600)">Aucune ligne comptable</div><div style="font-size:12px;color:var(--g400)">Aucune ligne trouvée pour cette facture dans LignesFacture</div></div>`;
+    el.innerHTML=`<div class="cp-empty"><div style="font-size:36px">🧾</div><div style="font-size:14px;font-weight:500;color:var(--g600)">Aucune ligne comptable</div><div style="font-size:12px;color:var(--g400)">Aucune ligne trouvée pour cette facture</div></div>`;
     return;
   }
-
   const rows2=lignesData.map((l,i)=>{
     const cc=esc(l.CompteComptable||'');
-    const lib=esc(l.LibelleCompte||getLibelle(l.CompteComptable)||'');
+    const lib=esc(l.LibelleCompte||'');
     const libClass=lib?'cp-libelle found':'cp-libelle';
     return`<tr id="cp-row-${i}">
       <td class="mono" style="color:var(--g500);font-size:11px">${esc(l.NumeroLigne||String(i+1))}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.Designation||'')}">${esc(l.Designation||'—')}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.Designation||'')}">${esc(l.Designation||'—')}</td>
       <td style="text-align:right">${l.Quantite!=null?Number(l.Quantite).toLocaleString('fr-FR',{maximumFractionDigits:3}):'—'}</td>
       <td>${esc(l.Unite||'')}</td>
       <td class="mono" style="text-align:right">${l.PUHT!=null?fa(l.PUHT):'—'}</td>
       <td class="mono" style="text-align:right;font-weight:600">${l.MontantHT!=null?fa(l.MontantHT):'—'}</td>
       <td style="text-align:right">${l.TVAPct!=null?l.TVAPct+'%':'—'}</td>
       <td>
-        <input class="cp-input" id="cp-cc-${i}" value="${cc}" maxlength="10"
-          oninput="onCCChange(${i},this.value)"
-          onblur="onCCBlur(${i},this.value)"
-          placeholder="ex: 606300">
+        <div class="cp-ac-wrap" id="cp-acwrap-${i}">
+          <input class="cp-ac-input" id="cp-cc-${i}" value="${cc}" maxlength="10"
+            placeholder="ex: 606300"
+            autocomplete="off"
+            oninput="onACInput(${i},this.value)"
+            onkeydown="onACKey(event,${i})"
+            onfocus="onACFocus(${i})"
+            onblur="onACBlur(${i})">
+          <div class="cp-ac-drop" id="cp-acdrop-${i}"></div>
+        </div>
       </td>
       <td><div class="${libClass}" id="cp-lib-${i}" title="${lib}">${lib||'<span style="color:var(--g300)">—</span>'}</div></td>
       <td>
@@ -1042,59 +1041,126 @@ function rCompta(){
   const dirtyCount=lignesData.filter(l=>l._dirty).length;
 
   el.innerHTML=`
-    <div style="margin-bottom:12px;padding:10px 12px;background:var(--g50);border:1px solid var(--g200);border-radius:8px;display:flex;gap:16px;font-size:12px;flex-wrap:wrap">
+    <div id="cp-header" style="margin-bottom:12px;padding:10px 12px;background:var(--g50);border:1px solid var(--g200);border-radius:8px;display:flex;gap:16px;font-size:12px;flex-wrap:wrap">
       <span>📦 <strong>${lignesData.length}</strong> ligne${lignesData.length>1?'s':''}</span>
       <span>💰 Total HT : <strong>${fa(totalHT)} €</strong></span>
       ${dirtyCount?`<span style="color:var(--orange)">✏️ <strong>${dirtyCount}</strong> modification${dirtyCount>1?'s':''} en attente</span>`:'<span style="color:var(--green)">✅ Tout est sauvegardé</span>'}
+      ${!planLoaded?`<span style="color:var(--g400)">⏳ Chargement plan comptable…</span>`:'<span style="color:var(--g400)">📗 '+planComptable.length+' comptes disponibles</span>'}
     </div>
     <div class="cptab-wrap">
       <table class="cptab">
         <thead><tr>
-          <th>N° L.</th><th>Désignation</th><th style="text-align:right">Qté</th><th>Unité</th>
+          <th>N°</th><th>Désignation</th><th style="text-align:right">Qté</th><th>Unité</th>
           <th style="text-align:right">PU HT</th><th style="text-align:right">Montant HT</th>
-          <th style="text-align:right">TVA</th><th>Compte</th><th>Libellé</th><th></th>
+          <th style="text-align:right">TVA</th><th>Compte comptable</th><th>Libellé</th><th></th>
         </tr></thead>
         <tbody>${rows2}</tbody>
       </table>
     </div>
     <div class="cp-footer">
-      <div class="cp-footer-info">Modifier le Compte Comptable puis sauvegarder ligne par ligne ou tout d'un coup</div>
+      <div class="cp-footer-info">Tapez un code ou un mot-clé pour rechercher dans le plan comptable</div>
       <button class="cp-save-all" id="cp-save-all" onclick="saveAllLignes()" ${!dirtyCount?'disabled':''}>
         💾 Tout sauvegarder${dirtyCount?` (${dirtyCount})`:''}
       </button>
     </div>`;
 }
 
-function onCCChange(i, val){
-  const inp=document.getElementById(`cp-cc-${i}`);
-  const libEl=document.getElementById(`cp-lib-${i}`);
-  const svEl=document.getElementById(`cp-sv-${i}`);
-  if(!inp||!libEl)return;
+// ── Autocomplete ──────────────────────────────────────────────
+
+function onACInput(i, val){
+  acActiveRow=i; acActiveIdx=-1;
   lignesData[i]._newCC=val.trim();
   lignesData[i]._dirty=true;
-  inp.classList.add('dirty');inp.classList.remove('saved');
+  const inp=document.getElementById(`cp-cc-${i}`);
+  const svEl=document.getElementById(`cp-sv-${i}`);
+  inp&&inp.classList.add('dirty');inp&&inp.classList.remove('saved');
   svEl&&svEl.classList.add('pending');
-  // Mise à jour libellé en temps réel
-  const lib=getLibelle(val.trim());
-  if(lib){
-    libEl.textContent=lib;
-    libEl.className='cp-libelle found';
-    libEl.title=lib;
-  } else {
-    libEl.innerHTML='<span style="color:var(--g300)">—</span>';
-    libEl.className='cp-libelle';
-    libEl.title='';
-  }
+  renderDrop(i, val);
+  rComptaFooter();
 }
 
-function onCCBlur(i, val){
-  // Rien de spécial, déjà géré dans onCCChange
+function onACFocus(i){
+  acActiveRow=i;
+  const val=document.getElementById(`cp-cc-${i}`)?.value||'';
+  renderDrop(i, val);
 }
+
+function onACBlur(i){
+  // Délai pour laisser le clic sur un item se déclencher d'abord
+  setTimeout(()=>{
+    const drop=document.getElementById(`cp-acdrop-${i}`);
+    if(drop)drop.classList.remove('open');
+  },180);
+}
+
+function onACKey(e, i){
+  const drop=document.getElementById(`cp-acdrop-${i}`);
+  if(!drop||!drop.classList.contains('open'))return;
+  const items=drop.querySelectorAll('.cp-ac-item');
+  if(e.key==='ArrowDown'){e.preventDefault();acActiveIdx=Math.min(acActiveIdx+1,items.length-1);highlightDrop(i);}
+  else if(e.key==='ArrowUp'){e.preventDefault();acActiveIdx=Math.max(acActiveIdx-1,0);highlightDrop(i);}
+  else if(e.key==='Enter'||e.key==='Tab'){
+    if(acActiveIdx>=0&&items[acActiveIdx]){e.preventDefault();items[acActiveIdx].click();}
+  }
+  else if(e.key==='Escape'){drop.classList.remove('open');}
+}
+
+function highlightDrop(i){
+  const drop=document.getElementById(`cp-acdrop-${i}`);
+  if(!drop)return;
+  drop.querySelectorAll('.cp-ac-item').forEach((el,idx)=>{
+    el.classList.toggle('active',idx===acActiveIdx);
+    if(idx===acActiveIdx)el.scrollIntoView({block:'nearest'});
+  });
+}
+
+function renderDrop(i, val){
+  const drop=document.getElementById(`cp-acdrop-${i}`);
+  if(!drop)return;
+  if(!val||val.length<2){drop.classList.remove('open');return;}
+  if(!planLoaded){
+    drop.innerHTML=`<div class="cp-ac-loading">⏳ Chargement du plan comptable…</div>`;
+    drop.classList.add('open');
+    // Retry dans 1s si plan pas encore chargé
+    setTimeout(()=>{const v=document.getElementById(`cp-cc-${i}`)?.value||'';if(v)renderDrop(i,v);},1000);
+    return;
+  }
+  const results=searchPlan(val);
+  if(!results.length){
+    drop.innerHTML=`<div class="cp-ac-empty">Aucun compte trouvé pour « ${esc(val)} »</div>`;
+    drop.classList.add('open');return;
+  }
+  drop.innerHTML=results.map((c,idx)=>`
+    <div class="cp-ac-item" data-idx="${idx}" onmousedown="selectCompte(${i},'${c.Compte.replace(/'/g,"\\'")}','${c.Libelle.replace(/'/g,"\\'")}')">
+      <span class="cp-ac-code">${esc(c.Compte)}</span>
+      <span class="cp-ac-label">${esc(c.Libelle)}</span>
+      <span class="cp-ac-classe">${esc(c.Classe.replace(/^\d+ - /,''))}</span>
+    </div>`).join('');
+  drop.classList.add('open');
+  acActiveIdx=-1;
+}
+
+function selectCompte(i, compte, libelle){
+  const inp=document.getElementById(`cp-cc-${i}`);
+  const libEl=document.getElementById(`cp-lib-${i}`);
+  const drop=document.getElementById(`cp-acdrop-${i}`);
+  const svEl=document.getElementById(`cp-sv-${i}`);
+  if(inp){inp.value=compte;inp.classList.add('dirty');inp.classList.remove('saved');}
+  if(libEl){libEl.textContent=libelle;libEl.className='cp-libelle found';libEl.title=libelle;}
+  if(drop)drop.classList.remove('open');
+  lignesData[i]._newCC=compte;
+  lignesData[i]._newLib=libelle;
+  lignesData[i]._dirty=true;
+  svEl&&svEl.classList.add('pending');
+  rComptaFooter();
+}
+
+// ── Sauvegarde ────────────────────────────────────────────────
 
 async function saveLigne(i){
   const l=lignesData[i];if(!l)return;
   const newCC=(l._newCC!==undefined?l._newCC:l.CompteComptable)||'';
-  const newLib=getLibelle(newCC)||l.LibelleCompte||'';
+  const newLib=l._newLib||(planLoaded?getLibelleFromPlan(newCC):'')||l.LibelleCompte||'';
   const svEl=document.getElementById(`cp-sv-${i}`);
   const inp=document.getElementById(`cp-cc-${i}`);
   if(svEl)svEl.textContent='⏳';
@@ -1111,8 +1177,9 @@ async function saveLigne(i){
     lignesData[i].LibelleCompte=newLib;
     lignesData[i]._dirty=false;
     delete lignesData[i]._newCC;
+    delete lignesData[i]._newLib;
     inp&&inp.classList.remove('dirty');inp&&inp.classList.add('saved');
-    svEl&&(svEl.textContent='✅');svEl&&svEl.classList.remove('pending');
+    if(svEl){svEl.textContent='✅';svEl.classList.remove('pending');}
     setTimeout(()=>{
       const sv2=document.getElementById(`cp-sv-${i}`);
       if(sv2){sv2.textContent='💾';sv2.classList.remove('pending');}
@@ -1124,7 +1191,7 @@ async function saveLigne(i){
   }catch(e){
     console.error('saveLigne error:',e);
     if(svEl){svEl.textContent='⚠️';svEl.classList.remove('pending');}
-    toast('⚠️ Erreur sauvegarde : '+e.message,'err');
+    toast('⚠️ Erreur : '+e.message,'err');
     setTimeout(()=>{const sv2=document.getElementById(`cp-sv-${i}`);if(sv2)sv2.textContent='💾';},2500);
   }
 }
@@ -1135,9 +1202,7 @@ async function saveAllLignes(){
   const btn=document.getElementById('cp-save-all');
   if(btn){btn.disabled=true;btn.innerHTML='⏳ Sauvegarde…';}
   let ok=0,err=0;
-  for(const {i} of dirty){
-    try{await saveLigne(i);ok++;}catch(e){err++;console.error(e);}
-  }
+  for(const {i} of dirty){try{await saveLigne(i);ok++;}catch(e){err++;}}
   if(btn){btn.disabled=false;btn.innerHTML=`💾 Tout sauvegarder`;}
   rComptaFooter();
   if(err===0)toast(`✅ ${ok} ligne${ok>1?'s':''} sauvegardée${ok>1?'s':''}`, 'ok');
@@ -1147,21 +1212,24 @@ async function saveAllLignes(){
 function rComptaFooter(){
   const dirtyCount=lignesData.filter(l=>l._dirty).length;
   const totalHT=lignesData.reduce((s,l)=>s+(l.MontantHT?parseFloat(l.MontantHT):0),0);
-  const infoEl=document.querySelector('.cp-footer-info');
-  const btnEl=document.getElementById('cp-save-all');
-  const header=document.querySelector('#tcompta > div:first-child');
-  if(header){
-    header.innerHTML=`
-      <span>📦 <strong>${lignesData.length}</strong> ligne${lignesData.length>1?'s':''}</span>
-      <span>💰 Total HT : <strong>${fa(totalHT)} €</strong></span>
-      ${dirtyCount?`<span style="color:var(--orange)">✏️ <strong>${dirtyCount}</strong> modification${dirtyCount>1?'s':''} en attente</span>`:'<span style="color:var(--green)">✅ Tout est sauvegardé</span>'}`;
-  }
-  if(btnEl){btnEl.disabled=!dirtyCount;btnEl.innerHTML=`💾 Tout sauvegarder${dirtyCount?` (${dirtyCount})`:''}`;}
+  const h=document.getElementById('cp-header');
+  if(h){h.innerHTML=`
+    <span>📦 <strong>${lignesData.length}</strong> ligne${lignesData.length>1?'s':''}</span>
+    <span>💰 Total HT : <strong>${fa(totalHT)} €</strong></span>
+    ${dirtyCount?`<span style="color:var(--orange)">✏️ <strong>${dirtyCount}</strong> modification${dirtyCount>1?'s':''} en attente</span>`:'<span style="color:var(--green)">✅ Tout est sauvegardé</span>'}
+    <span style="color:var(--g400)">📗 ${planComptable.length} comptes</span>`;}
+  const btn=document.getElementById('cp-save-all');
+  if(btn){btn.disabled=!dirtyCount;btn.innerHTML=`💾 Tout sauvegarder${dirtyCount?` (${dirtyCount})`:''}`;}
 }
 
 // Réinitialiser les lignes quand on change de facture
 const _origClosePanel=closePanel;
-closePanel=function(){_origClosePanel();lignesLoaded=false;lignesCleUnique='';lignesData=[];document.getElementById('lcnt').textContent='—';};
+closePanel=function(){
+  _origClosePanel();
+  lignesLoaded=false;lignesCleUnique='';lignesData=[];
+  acActiveIdx=-1;acActiveRow=-1;
+  document.getElementById('lcnt').textContent='—';
+};
 setInterval(()=>{if(account)loadData();},120000);
 </script>
 </body>
