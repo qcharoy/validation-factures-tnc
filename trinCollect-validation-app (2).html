@@ -659,30 +659,31 @@ function rPDF(f){
 
 async function loadPDFviaGraph(lien){
   try{
-    // Forcer un refresh du token via silent si compte disponible
-    let tok='';
     const accounts=msalApp.getAllAccounts();
-    if(accounts.length>0){
-      try{
-        const r=await msalApp.acquireTokenSilent({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account:accounts[0]});
-        tok=r.accessToken;
-      }catch(e){
-        const r=await msalApp.acquireTokenPopup({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account:accounts[0]});
-        tok=r.accessToken;
-      }
+    if(!accounts.length)throw new Error('Non connecté');
+    let tok='';
+    try{
+      const r=await msalApp.acquireTokenSilent({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account:accounts[0]});
+      tok=r.accessToken;
+    }catch(e){
+      const r=await msalApp.acquireTokenPopup({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account:accounts[0]});
+      tok=r.accessToken;
     }
-    if(!tok)throw new Error('Token manquant — reconnectez-vous');
-    // Construire l URL Graph API proprement sans template literal sur le chemin
-    const driveId='dbe32566-79f0-401c-a3f8-1a1a46a8463d';
-    // Extraire le chemin brut sans décoder
+    if(!tok)throw new Error('Token vide');
+    // Construire l URL Graph API avec la syntaxe /sites/hostname:/sites/nom:/drive/root:/chemin:/content
     const urlObj=new URL(lien);
     const rawParts=urlObj.pathname.split('/');
     // rawParts = ['','sites','FacturesFournisseurs','Documents%20partages','Factures','xxx.pdf']
-    const fileSegments=rawParts.slice(3); // ['Documents%20partages','Factures','xxx.pdf']
-    const drivePath=fileSegments.join('/'); // Documents%20partages/Factures/xxx.pdf
-    const graphBase='https://graph.microsoft.com/v1.0/drives/'+driveId+'/root:/'+drivePath+':/content';
+    const siteName=rawParts[2];
+    const filePath=rawParts.slice(3).join('/');
+    const graphBase='https://graph.microsoft.com/v1.0/sites/trincollect.sharepoint.com:/sites/'+siteName+':/drive/root:/'+filePath+':/content';
+    console.log('PDF Graph URL:', graphBase);
     const res=await fetch(graphBase,{headers:{Authorization:'Bearer '+tok}});
-    if(!res.ok)throw new Error('Graph API: HTTP '+res.status);
+    if(!res.ok){
+      const errBody=await res.text();
+      console.error('Graph error body:', errBody);
+      throw new Error('Graph API: HTTP '+res.status);
+    }
     const blob=await res.blob();
     const blobUrl=URL.createObjectURL(blob);
     const el=document.getElementById('pdf-loader');
