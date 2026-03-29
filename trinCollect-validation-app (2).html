@@ -659,8 +659,19 @@ function rPDF(f){
 
 async function loadPDFviaGraph(lien){
   try{
-    const tok=await getToken();
-    if(!tok)throw new Error('Token manquant');
+    // Forcer un refresh du token via silent si compte disponible
+    let tok='';
+    const accounts=msalApp.getAllAccounts();
+    if(accounts.length>0){
+      try{
+        const r=await msalApp.acquireTokenSilent({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account:accounts[0]});
+        tok=r.accessToken;
+      }catch(e){
+        const r=await msalApp.acquireTokenPopup({scopes:['Sites.Read.All','Sites.ReadWrite.All'],account:accounts[0]});
+        tok=r.accessToken;
+      }
+    }
+    if(!tok)throw new Error('Token manquant — reconnectez-vous');
     // Construire l URL Graph API proprement sans template literal sur le chemin
     const driveId='dbe32566-79f0-401c-a3f8-1a1a46a8463d';
     // Extraire le chemin brut sans décoder
