@@ -980,15 +980,22 @@ async function loadLignes(){
 
   try{
     const flds='CleUnique,NumeroLigne,Chantier,AdresseChantier,Designation,Quantite,Unite,PUHT,MontantHT,TVAPct,CompteComptable,LibelleCompte,Cl_x00e9_UniqueLigne,Title';
-    // Filtre : CleUnique startswith CleUnique de la facture
-    const filter=`startswith(fields/CleUnique,'${cle.replace(/'/g,"''")}')`;
-    const url=`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${flds})&$filter=${encodeURIComponent(filter)}&$top=200&$orderby=fields/NumeroLigne`;
-    const data=await gGet(url);
-    lignesData=(data.value||[]).map(it=>({
-      _spId:it.id,
-      ...it.fields,
-      _dirty:false
-    }));
+    // Chargement de toutes les lignes + filtre côté client (CleUnique non indexé)
+    // On charge par pages de 500 pour couvrir les grosses listes
+    let allItems=[], nextUrl=`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${flds})&$top=500`;
+    while(nextUrl){
+      const data=await gGet(nextUrl);
+      allItems=allItems.concat(data.value||[]);
+      nextUrl=data['@odata.nextLink']?data['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
+    }
+    // Filtre JS : la CleUnique de la ligne doit commencer par la CleUnique de la facture
+    lignesData=allItems
+      .filter(it=>(it.fields?.CleUnique||'').startsWith(cle))
+      .sort((a,b)=>{
+        const na=parseInt(a.fields?.NumeroLigne||0), nb=parseInt(b.fields?.NumeroLigne||0);
+        return na-nb;
+      })
+      .map(it=>({_spId:it.id,...it.fields,_dirty:false}));
     lignesLoaded=true;
     document.getElementById('lcnt').textContent=lignesData.length||'0';
     rCompta();
