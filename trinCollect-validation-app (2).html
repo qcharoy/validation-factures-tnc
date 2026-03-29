@@ -671,18 +671,16 @@ async function loadPDFviaGraph(lien){
     }
     if(!tok)throw new Error('Token vide');
 
-    // Récupérer l ID de l item SharePoint depuis le champ _id
-    // puis appeler /sites/{siteId}/lists/{listId}/items/{itemId}/driveItem/content
-    const siteId='3b306d27-c333-4fc1-9211-9f7889cf8769';
-    const listId='bb8a3961-bf41-48d5-88c2-d4a3ece2f945';
-    const spItemId=curF._id;
-    const graphUrl='https://graph.microsoft.com/v1.0/sites/'+siteId+'/lists/'+listId+'/items/'+spItemId+'/driveItem/content';
-    console.log('PDF via item ID:', graphUrl);
+    // Utiliser l endpoint /shares avec l URL encodée en base64
+    // C est la methode officielle Microsoft pour acceder a un fichier par son URL SharePoint
+    const encodedUrl=btoa(lien).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+    const sharesUrl='https://graph.microsoft.com/v1.0/shares/u!'+encodedUrl+'/driveItem/content';
+    console.log('PDF via shares URL:', sharesUrl);
 
-    const res=await fetch(graphUrl,{headers:{Authorization:'Bearer '+tok}});
+    const res=await fetch(sharesUrl,{headers:{Authorization:'Bearer '+tok}});
     if(!res.ok){
-      const errBody=await res.text();
-      console.error('Graph error:', errBody);
+      const errBody=await res.text().catch(()=>'');
+      console.error('Shares error:', errBody);
       throw new Error('Graph API: HTTP '+res.status);
     }
     const blob=await res.blob();
