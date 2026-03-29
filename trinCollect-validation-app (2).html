@@ -670,18 +670,19 @@ async function loadPDFviaGraph(lien){
       tok=r.accessToken;
     }
     if(!tok)throw new Error('Token vide');
-    // Construire l URL Graph API avec la syntaxe /sites/hostname:/sites/nom:/drive/root:/chemin:/content
-    const urlObj=new URL(lien);
-    const rawParts=urlObj.pathname.split('/');
-    // rawParts = ['','sites','FacturesFournisseurs','Documents%20partages','Factures','xxx.pdf']
-    const siteName=rawParts[2];
-    const filePath=rawParts.slice(3).join('/');
-    const graphBase='https://graph.microsoft.com/v1.0/sites/trincollect.sharepoint.com:/sites/'+siteName+':/drive/root:/'+filePath+':/content';
-    console.log('PDF Graph URL:', graphBase);
-    const res=await fetch(graphBase,{headers:{Authorization:'Bearer '+tok}});
+
+    // Récupérer l ID de l item SharePoint depuis le champ _id
+    // puis appeler /sites/{siteId}/lists/{listId}/items/{itemId}/driveItem/content
+    const siteId='3b306d27-c333-4fc1-9211-9f7889cf8769';
+    const listId='bb8a3961-bf41-48d5-88c2-d4a3ece2f945';
+    const spItemId=curF._id;
+    const graphUrl='https://graph.microsoft.com/v1.0/sites/'+siteId+'/lists/'+listId+'/items/'+spItemId+'/driveItem/content';
+    console.log('PDF via item ID:', graphUrl);
+
+    const res=await fetch(graphUrl,{headers:{Authorization:'Bearer '+tok}});
     if(!res.ok){
       const errBody=await res.text();
-      console.error('Graph error body:', errBody);
+      console.error('Graph error:', errBody);
       throw new Error('Graph API: HTTP '+res.status);
     }
     const blob=await res.blob();
