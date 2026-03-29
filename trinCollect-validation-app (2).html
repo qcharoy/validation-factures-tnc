@@ -664,10 +664,11 @@ async function loadPDFviaGraph(lien){
     // Extraire le chemin du fichier depuis l URL SharePoint
     const urlObj=new URL(lien);
     // Utiliser le Drive ID directement + chemin relatif après le nom du site
-    const fullPath=decodeURIComponent(urlObj.pathname);
-    const parts=fullPath.split('/');
-    // parts = ['','sites','FacturesFournisseurs','Documents partages','Factures','xxx.pdf']
-    const drivePath=parts.slice(3).join('/');
+    // Ne pas décoder — garder le %20 intact pour l'URL Graph API
+    const rawPath=urlObj.pathname; // /sites/FacturesFournisseurs/Documents%20partages/Factures/xxx.pdf
+    const rawParts=rawPath.split('/');
+    // rawParts = ['','sites','FacturesFournisseurs','Documents%20partages','Factures','xxx.pdf']
+    const drivePath=rawParts.slice(3).join('/');
     // Drive ID fixe du tenant Tri'n'Collect
     const driveId='dbe32566-79f0-401c-a3f8-1a1a46a8463d';
     const graphUrl=`https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${drivePath}:/content`;
