@@ -283,7 +283,6 @@ td.mono{font-family:var(--mono);font-size:12px}
   <div class="tr">
     <span id="syn"></span>
     <button id="rbtn" title="Actualiser" onclick="loadData()">↻</button>
-    <button id="dbgbtn" onclick="showDebug()" style="background:rgba(255,255,255,.15);border:none;cursor:pointer;padding:4px 10px;border-radius:8px;color:white;font-size:12px;font-family:var(--font)">🔍 Debug</button>
     <span id="asts" class="nok" onclick="login()">Non connecté</span>
     <div id="ub" onclick="openConfig()">
       <div class="av" id="uav">?</div>
@@ -513,7 +512,6 @@ async function loadData(){
   document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="9">⏳ Chargement depuis SharePoint Lists…</td></tr>';
   try{
     // Colonnes à récupérer
-    // Pas de $select : on charge tous les champs pour ne pas exclure les colonnes Choice comme Typededocument
     let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields&$top=500`;
     let items=[];
     while(url){
@@ -522,18 +520,10 @@ async function loadData(){
       url=d['@odata.nextLink']?d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
     }
     rows=items.map(it=>{
-      const f=it.fields;
-      // Champ Choice : Graph retourne tous les champs quand pas de $select
-      // On cherche le bon nom parmi les variantes possibles
-      const typeDoc = f.Typededocument || f.Type_x0020_de_x0020_document || f.TypeDocument || f.Typedocument || f.OData__x0054_ypededocument || '';
-      return {_id:it.id,...f, Typededocument: typeDoc};
+      const f=it.fields||{};
+      const typeDoc=f.Typededocument||f.Type_x0020_de_x0020_document||f.TypeDocument||f.Typedocument||'';
+      return {_id:it.id,...f,Typededocument:typeDoc};
     });
-    // DEBUG — affiche le nom exact du champ type dans la console
-    if(rows.length && items.length){
-      const allKeys=Object.keys(items[0].fields||{});
-      const typeKeys=allKeys.filter(k=>k.toLowerCase().includes('type'));
-      console.log('TYPE keys trouvees:', typeKeys, '| valeurs:', typeKeys.map(k=>(items[0].fields||{})[k]));
-    }
     etabs=[...new Set(rows.map(r=>r.EtablissementAffecte||'').filter(Boolean))].sort();
     const sel=document.getElementById('fe');
     sel.innerHTML='<option value="">Tous les établissements</option>'+etabs.map(e=>`<option value="${e}">${e}</option>`).join('');
@@ -640,24 +630,10 @@ function pills(r){
   }).join('')}</div>`;
 }
 
-function showDebug(){
-  if(!rows||!rows.length){alert('Aucune donnée chargée. Connectez-vous d'abord.');return;}
-  const r=rows[0];
-  const typeKeys=Object.keys(r).filter(k=>k.toLowerCase().includes('type'));
-  const msg='=== CHAMPS CONTENANT "type" ===\n'
-    +typeKeys.map(k=>k+' : '+JSON.stringify(r[k])).join('\n')
-    +'\n\n=== TOUS LES CHAMPS ===\n'
-    +Object.keys(r).join(', ');
-  alert(msg);
-}
 function docTypeBadge(t){
-  const m={
-    'Facture':    {c:'bg2',  i:'🧾'},
-    'Avoir':      {c:'bb2',  i:'↩️'},
-    'Bordereau de rachat': {c:'bp2', i:'📦'},
-  };
-  const d=m[t]||{c:'bgr2',i:'📄'};
-  return`<span class="badge ${d.c}">${d.i} ${esc(t||'—')}</span>`;
+  const m={'Facture':{c:'bg2',i:'Facture'},'Avoir':{c:'bb2',i:'Avoir'},'Bordereau de rachat':{c:'bp2',i:'Bordereau'}};
+  const d=m[t]||{c:'bgr2',i:t||'—'};
+  return`<span class="badge ${d.c}">${esc(d.i)}</span>`;
 }
 
 // ══ PANEL ════════════════════════════════════════════════════
