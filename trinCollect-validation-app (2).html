@@ -330,6 +330,7 @@ td.mono{font-family:var(--mono);font-size:12px}
         <thead><tr>
           <th onclick="srt('Fournisseur')">Fournisseur ↕</th>
           <th onclick="srt('NumeroFacture')">N° Facture</th>
+          <th onclick="srt('Typededocument')">Type</th>
           <th onclick="srt('DateFacture')">Date ↕</th>
           <th onclick="srt('TotalTTC')">TTC ↕</th>
           <th>Établissement</th>
@@ -337,7 +338,7 @@ td.mono{font-family:var(--mono);font-size:12px}
           <th>Circuit</th>
           <th onclick="srt('DateEcheance')">Échéance</th>
         </tr></thead>
-        <tbody id="tbd"><tr class="ldr"><td colspan="8">Connexion requise…</td></tr></tbody>
+        <tbody id="tbd"><tr class="ldr"><td colspan="9">Connexion requise…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -508,7 +509,7 @@ lcmts();
 // ══ LOAD DATA ════════════════════════════════════════════════
 async function loadData(){
   if(!account)return;
-  document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="8">⏳ Chargement depuis SharePoint Lists…</td></tr>';
+  document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="9">⏳ Chargement depuis SharePoint Lists…</td></tr>';
   try{
     // Colonnes à récupérer
     const flds='CleUnique,Fournisseur,SIRET,IBAN,NumeroFacture,DateFacture,DateEcheance,TotalHT,TVA,TotalTTC,EtablissementAffecte,ModeReglement,Statut,DateTraitement,LienFacture,DateValidationN1,DateValidationN2,DateValidationN3,DateValidationN4,DateValidationN5,ValideParN1,ValideParN2,ValideParN3,ValideParN4,ValideParN5,MotifBlocage,MontantBlocage,Alertes,Confidentiel,Title';
@@ -528,7 +529,7 @@ async function loadData(){
     if(curV==='st')renderStats();
   }catch(e){
     console.error(e);
-    document.getElementById('tbd').innerHTML=`<tr class="ldr"><td colspan="8">⚠️ ${esc(e.message)}<br><small>Vérifiez la configuration (⚙️) et vos droits SharePoint</small></td></tr>`;
+    document.getElementById('tbd').innerHTML=`<tr class="ldr"><td colspan="9">⚠️ ${esc(e.message)}<br><small>Vérifiez la configuration (⚙️) et vos droits SharePoint</small></td></tr>`;
     toast('⚠️ Erreur chargement','err');
   }
 }
@@ -589,7 +590,7 @@ function renderTable(){
   const r=getRows();
   const tb=document.getElementById('tbd');
   if(!r.length){
-    tb.innerHTML=`<tr><td colspan="8"><div class="empty"><div class="ei">📭</div><div class="et">Aucune facture</div><div class="es">Aucune facture ne correspond</div></div></td></tr>`;
+    tb.innerHTML=`<tr><td colspan="9"><div class="empty"><div class="ei">📭</div><div class="et">Aucune facture</div><div class="es">Aucune facture ne correspond</div></div></td></tr>`;
     document.getElementById('sr').innerHTML='';return;
   }
   const ttc=r.reduce((s,x)=>s+pa(x.TotalTTC),0);
@@ -603,6 +604,7 @@ function renderTable(){
     return `<tr onclick="openPanel('${esc(cle)}')">
       <td><strong>${esc(x.Fournisseur||'—')}</strong>${confBadge}${nc?` <span style="font-size:11px;color:var(--g400)">💬${nc}</span>`:''}${x.Alertes?` <span style="font-size:11px">⚠️</span>`:''}</td>
       <td class="mono">${esc(x.NumeroFacture||'—')}</td>
+      <td>${docTypeBadge(x.Typededocument)}</td>
       <td>${fd(x.DateFacture)}</td>
       <td class="amt${ttc2>5000?' ah':''}">${fa(ttc2)} €</td>
       <td>${esc(x.EtablissementAffecte||'—')}</td>
@@ -623,6 +625,16 @@ function pills(r){
     if(l===nd+1)return`<div class="pill cur"></div>`;
     return`<div class="pill"></div>`;
   }).join('')}</div>`;
+}
+
+function docTypeBadge(t){
+  const m={
+    'Facture':    {c:'bg2',  i:'🧾'},
+    'Avoir':      {c:'bb2',  i:'↩️'},
+    'Bordereau de rachat': {c:'bp2', i:'📦'},
+  };
+  const d=m[t]||{c:'bgr2',i:'📄'};
+  return`<span class="badge ${d.c}">${d.i} ${esc(t||'—')}</span>`;
 }
 
 // ══ PANEL ════════════════════════════════════════════════════
@@ -648,6 +660,7 @@ function rInfos(f){
     <div class="ig">
       <div class="ib s2"><div class="ik">Fournisseur</div><div class="iv" style="font-size:17px">${esc(f.Fournisseur||'—')}</div></div>
       <div class="ib"><div class="ik">N° Facture</div><div class="iv mono">${esc(f.NumeroFacture||'—')}</div></div>
+      <div class="ib"><div class="ik">Type de document</div><div class="iv">${docTypeBadge(f.Typededocument)}</div></div>
       <div class="ib"><div class="ik">Date Facture</div><div class="iv">${fd(f.DateFacture)}</div></div>
       <div class="ib"><div class="ik">Date Échéance</div><div class="iv${isUrg(f)?' ah':''}">${fd(f.DateEcheance)||'—'}</div></div>
       <div class="ib hl"><div class="ik">Total TTC</div><div class="iv aamt">${fa(ttc)} €</div></div>
