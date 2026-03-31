@@ -283,6 +283,7 @@ td.mono{font-family:var(--mono);font-size:12px}
   <div class="tr">
     <span id="syn"></span>
     <button id="rbtn" title="Actualiser" onclick="loadData()">↻</button>
+    <button id="dbgbtn" onclick="showDebug()" style="background:rgba(255,255,255,.15);border:none;cursor:pointer;padding:4px 10px;border-radius:8px;color:white;font-size:12px;font-family:var(--font)">🔍 Debug</button>
     <span id="asts" class="nok" onclick="login()">Non connecté</span>
     <div id="ub" onclick="openConfig()">
       <div class="av" id="uav">?</div>
@@ -512,15 +513,27 @@ async function loadData(){
   document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="9">⏳ Chargement depuis SharePoint Lists…</td></tr>';
   try{
     // Colonnes à récupérer
-    const flds='CleUnique,Fournisseur,SIRET,IBAN,NumeroFacture,DateFacture,DateEcheance,TotalHT,TVA,TotalTTC,EtablissementAffecte,ModeReglement,Statut,DateTraitement,LienFacture,DateValidationN1,DateValidationN2,DateValidationN3,DateValidationN4,DateValidationN5,ValideParN1,ValideParN2,ValideParN3,ValideParN4,ValideParN5,MotifBlocage,MontantBlocage,Alertes,Confidentiel,Title';
-    let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields($select=${flds})&$top=500`;
+    // Pas de $select : on charge tous les champs pour ne pas exclure les colonnes Choice comme Typededocument
+    let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields&$top=500`;
     let items=[];
     while(url){
       const d=await gGet(url);
       items=items.concat(d.value||[]);
       url=d['@odata.nextLink']?d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
     }
-    rows=items.map(it=>({_id:it.id,...it.fields}));
+    rows=items.map(it=>{
+      const f=it.fields;
+      // Champ Choice : Graph retourne tous les champs quand pas de $select
+      // On cherche le bon nom parmi les variantes possibles
+      const typeDoc = f.Typededocument || f.Type_x0020_de_x0020_document || f.TypeDocument || f.Typedocument || f.OData__x0054_ypededocument || '';
+      return {_id:it.id,...f, Typededocument: typeDoc};
+    });
+    // DEBUG — affiche le nom exact du champ type dans la console
+    if(rows.length && items.length){
+      const allKeys=Object.keys(items[0].fields||{});
+      const typeKeys=allKeys.filter(k=>k.toLowerCase().includes('type'));
+      console.log('TYPE keys trouvees:', typeKeys, '| valeurs:', typeKeys.map(k=>(items[0].fields||{})[k]));
+    }
     etabs=[...new Set(rows.map(r=>r.EtablissementAffecte||'').filter(Boolean))].sort();
     const sel=document.getElementById('fe');
     sel.innerHTML='<option value="">Tous les établissements</option>'+etabs.map(e=>`<option value="${e}">${e}</option>`).join('');
@@ -627,6 +640,16 @@ function pills(r){
   }).join('')}</div>`;
 }
 
+function showDebug(){
+  if(!rows||!rows.length){alert('Aucune donnée chargée. Connectez-vous d'abord.');return;}
+  const r=rows[0];
+  const typeKeys=Object.keys(r).filter(k=>k.toLowerCase().includes('type'));
+  const msg='=== CHAMPS CONTENANT "type" ===\n'
+    +typeKeys.map(k=>k+' : '+JSON.stringify(r[k])).join('\n')
+    +'\n\n=== TOUS LES CHAMPS ===\n'
+    +Object.keys(r).join(', ');
+  alert(msg);
+}
 function docTypeBadge(t){
   const m={
     'Facture':    {c:'bg2',  i:'🧾'},
