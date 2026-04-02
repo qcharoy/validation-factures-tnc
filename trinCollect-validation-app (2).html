@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures</title>
+<title>Tri'n'Collect — Validation Factures v19</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -97,12 +97,14 @@ select.fs:focus{border-color:var(--green)}
 table{width:100%;border-collapse:collapse;background:white;border:1px solid var(--g200);border-radius:var(--r);overflow:hidden;font-size:13px}
 thead tr{background:var(--g50);border-bottom:1px solid var(--g200)}
 th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--g400);white-space:nowrap;cursor:pointer;user-select:none}
+th.th-id{width:56px;padding-right:6px}
 th:hover{color:var(--g700)}
 tbody tr{border-bottom:1px solid var(--g100);cursor:pointer;transition:background .1s}
 tbody tr:last-child{border-bottom:none}
 tbody tr:hover{background:var(--g50)}
 td{padding:11px 14px;vertical-align:middle}
 td.mono{font-family:var(--mono);font-size:12px}
+.col-id{width:52px;min-width:52px;max-width:52px}
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;white-space:nowrap}
 .bg2{background:var(--green-l);color:var(--green)}.bo2{background:var(--obg);color:var(--orange)}
 .br2{background:var(--rbg);color:var(--red)}.bp2{background:var(--pbg);color:var(--purple)}
@@ -316,29 +318,39 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="ph"><div><div class="pt" id="ptl">À valider</div><div class="pst" id="pst">Factures en attente de validation</div></div></div>
     <div class="sr" id="sr"></div>
     <div class="tlb">
-      <div class="sbx"><input type="text" id="sq" placeholder="Fournisseur, n° facture…" oninput="renderTable()"></div>
+      <div class="sbx"><input type="text" id="sq" placeholder="Fournisseur, n° facture, ID…" oninput="renderTable()"></div>
       <select class="fs" id="fe" onchange="renderTable()"><option value="">Tous les établissements</option></select>
-      <select class="fs" id="fp" onchange="renderTable()">
-        <option value="">Toute période</option>
-        <option value="7">7 jours</option>
-        <option value="30">30 jours</option>
-        <option value="90">90 jours</option>
+      <select class="fs" id="fdc" onchange="onPeriodFilterChange()" title="Filtrer par date de création">
+        <option value="">&#128197; Création : toute période</option>
+        <option value="cm">Mois en cours</option>
+        <option value="pm">Mois précédent</option>
+        <option value="6m">6 derniers mois</option>
+        <option value="12m">12 derniers mois</option>
+      </select>
+      <select class="fs" id="fdf" onchange="renderTable()" title="Filtrer par date de facture">
+        <option value="">&#129534; Facture : toute période</option>
+        <option value="cm">Mois en cours</option>
+        <option value="pm">Mois précédent</option>
+        <option value="6m">6 derniers mois</option>
+        <option value="12m">12 derniers mois</option>
       </select>
     </div>
     <div class="tw">
       <table>
         <thead><tr>
+          <th class="th-id" onclick="srt('_id')" title="ID SharePoint de l'item">ID ↕</th>
           <th onclick="srt('Fournisseur')">Fournisseur ↕</th>
           <th onclick="srt('NumeroFacture')">N° Facture</th>
           <th onclick="srt('Typededocument')">Type</th>
-          <th onclick="srt('DateFacture')">Date ↕</th>
+          <th onclick="srt('_created')" title="Date de création dans SharePoint">Créé ↕</th>
+          <th onclick="srt('DateFacture')">Date facture ↕</th>
           <th onclick="srt('TotalTTC')">TTC ↕</th>
           <th>Établissement</th>
           <th>Statut</th>
           <th>Circuit</th>
           <th onclick="srt('DateEcheance')">Échéance</th>
         </tr></thead>
-        <tbody id="tbd"><tr class="ldr"><td colspan="9">Connexion requise…</td></tr></tbody>
+        <tbody id="tbd"><tr class="ldr"><td colspan="11">Connexion requise…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -509,10 +521,17 @@ lcmts();
 // ══ LOAD DATA ════════════════════════════════════════════════
 async function loadData(){
   if(!account)return;
-  document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="9">⏳ Chargement depuis SharePoint Lists…</td></tr>';
+  document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="11">⏳ Chargement depuis SharePoint Lists…</td></tr>';
   try{
     // Colonnes à récupérer
-    let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields&$top=500`;
+    // Construire l'URL avec filtre de date côté API Graph si période sélectionnée
+    const fdcVal=document.getElementById('fdc')?.value||'';
+    let graphFilter='';
+    if(fdcVal){
+      const {start}=getPeriodRange(fdcVal);
+      graphFilter=`&$filter=fields/Created ge '${start.toISOString()}'`;
+    }
+    let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields&$top=500${graphFilter}`;
     let items=[];
     while(url){
       const d=await gGet(url);
@@ -522,17 +541,17 @@ async function loadData(){
     rows=items.map(it=>{
       const f=it.fields||{};
       const typeDoc=f.Typededocument||f.Type_x0020_de_x0020_document||f.TypeDocument||f.Typedocument||'';
-      return {_id:it.id,...f,Typededocument:typeDoc};
+      return {_id:it.id,_created:it.createdDateTime||f.Created||'',_idNum:parseInt(it.id)||0,...f,Typededocument:typeDoc};
     });
     etabs=[...new Set(rows.map(r=>r.EtablissementAffecte||'').filter(Boolean))].sort();
     const sel=document.getElementById('fe');
     sel.innerHTML='<option value="">Tous les établissements</option>'+etabs.map(e=>`<option value="${e}">${e}</option>`).join('');
-    document.getElementById('syn').textContent='Sync '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    document.getElementById('syn').textContent=`Sync ${new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} · ${rows.length} factures`;
     badges(); renderTable();
     if(curV==='st')renderStats();
   }catch(e){
     console.error(e);
-    document.getElementById('tbd').innerHTML=`<tr class="ldr"><td colspan="9">⚠️ ${esc(e.message)}<br><small>Vérifiez la configuration (⚙️) et vos droits SharePoint</small></td></tr>`;
+    document.getElementById('tbd').innerHTML=`<tr class="ldr"><td colspan="11">⚠️ ${esc(e.message)}<br><small>Vérifiez la configuration (⚙️) et vos droits SharePoint</small></td></tr>`;
     toast('⚠️ Erreur chargement','err');
   }
 }
@@ -571,19 +590,61 @@ function badges(){
 }
 
 // ══ TABLE ════════════════════════════════════════════════════
+// ══ HELPERS PÉRIODE ═════════════════════════════════════════
+function getPeriodRange(code){
+  const now=new Date();
+  let start,end;
+  if(code==='cm'){
+    start=new Date(now.getFullYear(),now.getMonth(),1);
+    end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
+  } else if(code==='pm'){
+    start=new Date(now.getFullYear(),now.getMonth()-1,1);
+    end=new Date(now.getFullYear(),now.getMonth(),0,23,59,59,999);
+  } else if(code==='6m'){
+    start=new Date(now.getFullYear(),now.getMonth()-5,1);
+    end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
+  } else if(code==='12m'){
+    start=new Date(now.getFullYear(),now.getMonth()-11,1);
+    end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
+  } else {
+    start=new Date(0);end=new Date(9999,11,31);
+  }
+  return {start,end};
+}
+
+// Formater date courte pour la colonne Créé
+function fdShort(d){
+  if(!d)return '—';
+  const dt=pd(d);
+  if(!dt)return '—';
+  return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit'});
+}
+
+// Appelé quand le filtre "Date création" change : recharge si nécessaire
+function onPeriodFilterChange(){
+  // Recharger les données depuis SharePoint avec le filtre de date côté API
+  loadData();
+}
+
 function srt(c){if(sCol===c)sDir*=-1;else{sCol=c;sDir=-1;}renderTable();}
 function getRows(){
   const vc=VIEWS[curV];if(!vc)return[];
   let r=rows.filter(vc.f);
   const q=(document.getElementById('sq')?.value||'').toLowerCase().trim();
-  if(q)r=r.filter(x=>(x.Fournisseur||'').toLowerCase().includes(q)||(x.NumeroFacture||'').toLowerCase().includes(q)||(x.CleUnique||'').toLowerCase().includes(q));
+  if(q)r=r.filter(x=>(x.Fournisseur||'').toLowerCase().includes(q)||(x.NumeroFacture||'').toLowerCase().includes(q)||(x.CleUnique||'').toLowerCase().includes(q)||(x._id||'').includes(q));
   const et=document.getElementById('fe')?.value;
   if(et)r=r.filter(x=>(x.EtablissementAffecte||'')===et);
-  const p=parseInt(document.getElementById('fp')?.value);
-  if(p){const cut=new Date();cut.setDate(cut.getDate()-p);r=r.filter(x=>{const d=pd(x.DateTraitement||x.DateFacture);return d&&d>=cut;});}
+  // Filtre par date de création
+  const fdc=document.getElementById('fdc')?.value;
+  if(fdc){const {start,end}=getPeriodRange(fdc);r=r.filter(x=>{const d=pd(x._created);return d&&d>=start&&d<=end;});}
+  // Filtre par date de facture
+  const fdf=document.getElementById('fdf')?.value;
+  if(fdf){const {start,end}=getPeriodRange(fdf);r=r.filter(x=>{const d=pd(x.DateFacture);return d&&d>=start&&d<=end;});}
   r.sort((a,b)=>{
     let va=a[sCol]||'',vb=b[sCol]||'';
     if(sCol==='TotalTTC'){va=pa(va);vb=pa(vb);}
+    else if(sCol==='_id'){va=a._idNum||0;vb=b._idNum||0;}
+    else if(sCol==='_created'){va=pd(a._created)||new Date(0);vb=pd(b._created)||new Date(0);}
     else if(sCol.startsWith('Date')){va=pd(va)||new Date(0);vb=pd(vb)||new Date(0);}
     return va>vb?sDir:va<vb?-sDir:0;
   });
@@ -593,7 +654,7 @@ function renderTable(){
   const r=getRows();
   const tb=document.getElementById('tbd');
   if(!r.length){
-    tb.innerHTML=`<tr><td colspan="9"><div class="empty"><div class="ei">📭</div><div class="et">Aucune facture</div><div class="es">Aucune facture ne correspond</div></div></td></tr>`;
+    tb.innerHTML=`<tr><td colspan="11"><div class="empty"><div class="ei">📭</div><div class="et">Aucune facture</div><div class="es">Aucune facture ne correspond aux filtres</div></div></td></tr>`;
     document.getElementById('sr').innerHTML='';return;
   }
   const ttc=r.reduce((s,x)=>s+pa(x.TotalTTC),0);
@@ -605,9 +666,11 @@ function renderTable(){
     const st=STAT[x.Statut]||{c:'bgr2',i:'?'},ttc2=pa(x.TotalTTC),cle=x.CleUnique||'',nc=(cmts[cle]||[]).length,urg2=isUrg(x)?'🔴':'';
     const confBadge=x.Confidentiel?` <span title="Facture confidentielle" style="font-size:11px">🔒</span>`:'';
     return `<tr onclick="openPanel('${esc(cle)}')">
+      <td class="mono" style="font-size:11px;color:var(--g400);white-space:nowrap">${esc(x._id||'—')}</td>
       <td><strong>${esc(x.Fournisseur||'—')}</strong>${confBadge}${nc?` <span style="font-size:11px;color:var(--g400)">💬${nc}</span>`:''}${x.Alertes?` <span style="font-size:11px">⚠️</span>`:''}</td>
       <td class="mono">${esc(x.NumeroFacture||'—')}</td>
       <td>${docTypeBadge(x.Typededocument)}</td>
+      <td style="font-size:12px;color:var(--g500);white-space:nowrap">${fdShort(x._created)}</td>
       <td>${fd(x.DateFacture)}</td>
       <td class="amt${ttc2>5000?' ah':''}">${fa(ttc2)} €</td>
       <td>${esc(x.EtablissementAffecte||'—')}</td>
