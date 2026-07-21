@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v20)</title>
+<title>Tri'n'Collect — Validation Factures (v23)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -113,8 +113,14 @@ td.mono{font-family:var(--mono);font-size:12px}
 .pill.done{background:var(--green)}.pill.cur{background:var(--orange)}.pill.blk{background:var(--red)}
 
 /* PANEL */
-#dp{position:fixed;top:0;right:-920px;width:900px;height:100vh;background:white;box-shadow:var(--sh-lg);display:flex;flex-direction:column;z-index:1000;transition:right .3s cubic-bezier(.4,0,.2,1)}
-#dp.open{right:0}
+/* v21 : le panneau était figé à 900 px, l'agence sortait du champ de vision.
+   Largeur par défaut portée à 1400 px (bornée à 95 vw) + bascule plein écran.
+   Translation plutôt que 'right' négatif : l'animation suit la largeur réelle. */
+#dp{position:fixed;top:0;right:0;width:var(--dpw,min(1400px,95vw));height:100vh;background:white;box-shadow:var(--sh-lg);display:flex;flex-direction:column;z-index:1000;transform:translateX(102%);transition:transform .3s cubic-bezier(.4,0,.2,1),width .2s ease}
+#dp.open{transform:none}
+#dp.wide{--dpw:100vw}
+#dpw{background:none;border:1px solid var(--g200);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:14px;color:var(--g500);display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
+#dpw:hover{background:var(--g50);color:var(--g800);border-color:var(--g300)}
 #ov{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:999;opacity:0;pointer-events:none;transition:opacity .3s}
 #ov.open{opacity:1;pointer-events:all}
 .ptb{height:52px;border-bottom:1px solid var(--g200);display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0}
@@ -245,6 +251,19 @@ td.mono{font-family:var(--mono);font-size:12px}
 .cptab tbody tr:hover{background:var(--g50)}
 .cptab td{padding:8px 10px;vertical-align:middle}
 .cptab td.mono{font-family:var(--mono);font-size:11px}
+/* v21 : sur le tableau des lignes uniquement, l'agence et le bouton de
+   sauvegarde restent visibles même quand on fait défiler horizontalement.
+   Sans cela, la colonne la plus corrigée est celle qu'on ne voit jamais. */
+.cptab.lignes{font-size:11.5px}
+.cptab.lignes th,.cptab.lignes td{padding:6px 7px}
+.cptab.lignes th:nth-last-child(2),.cptab.lignes td:nth-last-child(2){
+  position:sticky;right:38px;z-index:3;box-shadow:-6px 0 8px -6px rgba(0,0,0,.18)}
+.cptab.lignes th:last-child,.cptab.lignes td:last-child{position:sticky;right:0;z-index:3}
+.cptab.lignes tbody td:nth-last-child(2),.cptab.lignes tbody td:last-child{background:white}
+.cptab.lignes tbody tr:hover td:nth-last-child(2),.cptab.lignes tbody tr:hover td:last-child{background:var(--g50)}
+.cptab.lignes thead th:nth-last-child(2),.cptab.lignes thead th:last-child{background:var(--g50);z-index:4}
+.cptab.lignes .cp-sel{max-width:none;width:100%;min-width:120px}
+.cptab.lignes td:nth-child(2){max-width:220px}
 .cp-input{width:90px;border:1px solid var(--g200);border-radius:5px;padding:4px 7px;font-size:12px;font-family:var(--mono);color:var(--g800);background:white;outline:none;transition:border-color .15s}
 .cp-input:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(30,122,74,.12)}
 .cp-input.dirty{border-color:var(--orange);background:var(--obg)}
@@ -371,6 +390,7 @@ td.mono{font-family:var(--mono);font-size:12px}
 <div id="dp">
   <div class="ptb">
     <span class="pttl" id="pttl">Détail facture</span>
+    <button id="dpw" onclick="togglePanelLarge()" title="Élargir / réduire le panneau (touche É)">⛶</button>
     <button class="bcl" onclick="closePanel()">✕</button>
   </div>
   <div class="ptabs">
@@ -611,7 +631,7 @@ function badges(){
     marquerDoublons();
     const nEc=rows.filter(r=>Object.keys(ECARTS).some(k=>ECARTS[k].f(r))).length;
     document.getElementById('b-ec').textContent=nEc;
-    const nPj=pjData.length?pjData.filter(p=>!estExamine(p)).length:'—';
+    const nPj=pjData.length?pjData.filter(p=>(p.__c||classerPJ(p)).cat==='compta'&&!estExamine(p)).length:'—';
     document.getElementById('b-pj').textContent=nPj;
   }catch(e){ /* modules pas encore chargés */ }
 }
@@ -684,6 +704,7 @@ function docTypeBadge(t){
 
 // ══ PANEL ════════════════════════════════════════════════════
 function openPanel(cle){
+  appliquerLargeurPanneau();
   const f=rows.find(r=>r.CleUnique===cle);if(!f)return;
   curF=f;
   document.getElementById('pttl').textContent=f.Fournisseur||'Facture';
@@ -691,6 +712,28 @@ function openPanel(cle){
   document.getElementById('dp').classList.add('open');
   document.getElementById('ov').classList.add('open');
 }
+// v21 — largeur du panneau, mémorisée d'une session à l'autre
+function togglePanelLarge(){
+  const dp=document.getElementById('dp');
+  const large=dp.classList.toggle('wide');
+  lss('tnc_dpw', large?'1':'0');
+  document.getElementById('dpw').textContent = large?'⤡':'⛶';
+  document.getElementById('dpw').title = large?'Réduire le panneau (touche É)':'Élargir le panneau (touche É)';
+}
+function appliquerLargeurPanneau(){
+  const large = lgs('tnc_dpw')==='1';
+  document.getElementById('dp').classList.toggle('wide', large);
+  const b=document.getElementById('dpw');
+  if(b){ b.textContent = large?'⤡':'⛶'; }
+}
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('dp')?.classList.contains('open')) return;
+  const dansUnChamp = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName||'');
+  if(dansUnChamp) return;
+  if(e.key==='é'||e.key==='É'||e.key==='e'&&e.altKey){ e.preventDefault(); togglePanelLarge(); }
+  if(e.key==='Escape') closePanel();
+});
+
 function closePanel(){document.getElementById('dp').classList.remove('open');document.getElementById('ov').classList.remove('open');curF=null;}
 function stab(t){
   document.querySelectorAll('.ptab').forEach(el=>el.classList.toggle('active',el.dataset.tab===t));
@@ -1289,7 +1332,7 @@ function rCompta(){
       </div>
     </div>
     <div class="cptab-wrap">
-      <table class="cptab">
+      <table class="cptab lignes">
         <thead><tr>
           <th>N° L.</th><th>Désignation</th><th>Matière</th><th style="text-align:right">Qté</th><th>Unité</th>
           <th style="text-align:right">PU HT</th><th style="text-align:right">Montant HT</th>
@@ -1620,6 +1663,10 @@ async function loadPJ(){
     }
     pjData=items.map(it=>({_spId:it.id,...(it.fields||{})}));
     pjData.sort((a,b)=>String(b.DateTraitement||'').localeCompare(String(a.DateTraitement||'')));
+    // v22 — vérifier que les colonnes de suivi existent AVANT de laisser
+    // l'utilisateur cocher : sinon il perd son geste sur une erreur Graph
+    // « Field 'Examine' is not recognized », peu parlante.
+    pjColonnesOk = await verifierColonnesPJ();
     rPJ();
   }catch(e){
     el.innerHTML=modHeader('📎 PJ à examiner','Erreur')
@@ -1628,50 +1675,193 @@ async function loadPJ(){
 }
 function estExamine(p){ const v=p.Examine; return v===true||v==='true'||v==='Oui'||v===1||v==='1'; }
 
+// v22 — les 4 colonnes de suivi d'examen, avec leur type SharePoint attendu
+const COLONNES_PJ = [
+  ['Examine',           'Oui/Non (booléen — surtout pas un champ Choix)'],
+  ['ExaminePar',        'Une seule ligne de texte'],
+  ['DateExamen',        'Date et heure'],
+  ['CommentaireExamen', 'Plusieurs lignes de texte']
+];
+let pjColonnesOk = true, pjColonnesManquantes = [];
+
+async function verifierColonnesPJ(){
+  pjColonnesManquantes = [];
+  try{
+    const d = await gGet(`/sites/${cfg.sid}/lists/${cfg.pjid}/columns?$select=name,displayName`);
+    const noms = new Set((d.value||[]).map(c=>c.name));
+    COLONNES_PJ.forEach(([n])=>{ if(!noms.has(n)) pjColonnesManquantes.push(n); });
+    return pjColonnesManquantes.length===0;
+  }catch(e){
+    // Droit de lecture des colonnes refusé : on ne bloque pas, on laissera
+    // l'erreur d'écriture parler si elle survient.
+    console.warn('[PJ] vérification des colonnes impossible :', e.message);
+    return true;
+  }
+}
+
+function bandeauColonnesPJ(){
+  if(pjColonnesOk) return '';
+  return `<div style="margin:0 24px 12px" class="cp-bandeau ko" >
+    <div style="display:block">
+      <div style="font-weight:700;margin-bottom:6px">⚠️ Le suivi d'examen n'est pas encore actif</div>
+      <div style="margin-bottom:8px">
+        ${pjColonnesManquantes.length} colonne(s) manquante(s) dans la liste <strong>PJAExaminer</strong>.
+        Les cases à cocher sont désactivées tant qu'elles n'existent pas — sinon SharePoint répond
+        <em>« Field 'Examine' is not recognized »</em> et votre clic est perdu.
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px;background:white;border-radius:6px;overflow:hidden">
+        <thead><tr style="background:var(--g50)">
+          <th style="padding:6px 9px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--g400)">Nom interne exact</th>
+          <th style="padding:6px 9px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--g400)">Type à choisir</th>
+          <th style="padding:6px 9px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--g400)">État</th>
+        </tr></thead>
+        <tbody>${COLONNES_PJ.map(([n,t])=>{
+          const ko=pjColonnesManquantes.includes(n);
+          return `<tr style="border-top:1px solid var(--g100)">
+            <td style="padding:6px 9px;font-family:var(--mono);font-weight:600">${esc(n)}</td>
+            <td style="padding:6px 9px;color:var(--g600)">${esc(t)}</td>
+            <td style="padding:6px 9px;text-align:center">${ko?'<span style="color:var(--red);font-weight:700">manquante</span>':'<span style="color:var(--green)">✓</span>'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+      <div style="margin-top:8px;font-size:11.5px;color:var(--g600)">
+        <strong>Où les créer :</strong> ouvrez la liste PJAExaminer → <em>+ Ajouter une colonne</em>.
+        Saisissez le nom <strong>sans accent ni espace</strong> — SharePoint fige le nom interne à la création :
+        « Examiné » deviendrait <code>Examin_x00e9_</code> et l'application ne le trouverait pas.
+        Vous pourrez renommer l'affichage ensuite, le nom interne ne bougera plus.
+      </div>
+      <div style="margin-top:8px"><button class="btn bgho bsm" onclick="loadPJ()">↻ J'ai créé les colonnes, revérifier</button></div>
+    </div>
+  </div>`;
+}
+
+// ══ v23 — TRI DES PJ PAR ENJEU COMPTABLE ══════════════════════
+// TypeDetecte est du texte libre produit par le modèle, pas une liste
+// fermée : on classe donc par motifs sur le type, la raison du rejet et
+// le nom du fichier, et non par égalité stricte.
+
+// Ce qui empêche de comptabiliser : une facture existe mais n'a pas été
+// lue, ou l'a été partiellement. Impact direct sur montant / affectation.
+const PJ_COMPTABLE = [
+  [/erreur[_ ]?extraction/i,                    'Erreur d\'extraction'],
+  [/totaux?\s+absents?|total\s+manquant/i,      'Totaux non lus'],
+  [/header\s+vide|en[- ]?t[êe]te\s+vide/i,      'En-tête non lu'],
+  [/timeout|d[ée]lai\s+d[ée]pass/i,             'Traitement interrompu'],
+  [/illisible|ocr|scan\s+de\s+mauvaise/i,       'Document illisible'],
+  [/montant|total\b|\bTVA\b|\bHT\b|\bTTC\b/i,   'Montant en cause'],
+  [/num[ée]ro\s+de\s+facture|r[ée]f[ée]rence\s+absente/i,'Référence absente'],
+  [/siret|siren|fournisseur\s+(inconnu|non\s+identifi)/i,'Fournisseur non identifié'],
+  [/affectation|[ée]tablissement|agence|chantier/i,'Affectation en cause'],
+  [/\bavoir\b/i,                                'Avoir'],
+  [/lignes?\s+(absente|manquante|incompl)/i,    'Lignes incomplètes'],
+  [/volumineux|trop\s+de\s+pages|taille/i,      'Fichier trop lourd']
+];
+
+// Ce qui n'a aucun impact comptable : documents contractuels,
+// commerciaux ou logistiques arrivés dans la boîte par ricochet.
+const PJ_HORS_PERIMETRE = [
+  [/conditions?\s+g[ée]n[ée]rales?|\bCGV\b|\bCGA\b|\bCGU\b/i,'Conditions générales'],
+  [/publicit|plaquette|catalogue|prospectus|newsletter/i,    'Document commercial'],
+  [/accus[ée]\s+de\s+r[ée]ception|\bAR\b\s+de\s+commande/i,  'Accusé de réception'],
+  [/bon\s+de\s+commande|\bBDC\b|devis|pro[\s-]?forma/i,      'Devis / commande'],
+  [/relev[ée]\s+(de\s+)?(compte|factures?)|\brelev[ée]\b/i,  'Relevé de compte'],
+  [/bon\s+de\s+livraison|\bBL\b|bon\s+de\s+pes[ée]e|ticket/i,'Bon de livraison / pesée'],
+  [/attestation|certificat|\bBSD\b|tra[çc]abilit[ée]\s+seule/i,'Attestation / certificat'],
+  [/contrat|avenant|mandat|\bSEPA\b|\bRIB\b/i,               'Contrat / mandat'],
+  [/courrier|lettre|signature|relance/i,                     'Courrier'],
+  [/notice|mode\s+d.emploi|\bFDS\b|fiche\s+de\s+donn/i,      'Documentation'],
+  [/non[_ -]?facture/i,                                      'Non-facture'],
+  [/page\s+(blanche|vierge)|vide\b|annexe/i,                 'Page vide / annexe']
+];
+
+// Renvoie {cat:'compta'|'hors'|'trancher', motif:'…'}
+function classerPJ(p){
+  const txt = [p.TypeDetecte, p.RaisonRejet, p.FileName, p.FournisseurDevine].filter(Boolean).join(' § ');
+  for(const [re,lib] of PJ_COMPTABLE)      if(re.test(txt)) return {cat:'compta',  motif:lib};
+  for(const [re,lib] of PJ_HORS_PERIMETRE) if(re.test(txt)) return {cat:'hors',    motif:lib};
+  return {cat:'trancher', motif:'Non classé'};
+}
+const CAT_PJ={
+  compta:  {lib:'Comptable',      ico:'🧮', badge:'bo2'},
+  trancher:{lib:'À trancher',     ico:'❓', badge:'bb2'},
+  hors:    {lib:'Hors périmètre', ico:'🗂️', badge:'bgr2'}
+};
+
+let pjCat='compta';      // filtre par défaut : uniquement l'enjeu comptable
+let pjResteSeul=false;
+
 function rPJ(){
   const el=document.getElementById('vmod');
-  const types=[...new Set(pjData.map(p=>p.TypeDetecte||'—'))].sort();
-  const vus=pjData.filter(estExamine).length, reste=pjData.length-vus;
-  let liste=pjData;
-  if(pjFiltre==='__reste') liste=pjData.filter(p=>!estExamine(p));
-  else if(pjFiltre) liste=pjData.filter(p=>(p.TypeDetecte||'—')===pjFiltre);
+  pjData.forEach(p=>{ if(!p.__c) p.__c=classerPJ(p); });
 
-  el.innerHTML = modHeader('📎 PJ à examiner', `${pjData.length} pièce(s) — ${reste} restante(s) à examiner`)
+  const nCat={compta:0,trancher:0,hors:0};
+  pjData.forEach(p=>nCat[p.__c.cat]++);
+  const compta=pjData.filter(p=>p.__c.cat==='compta');
+  const resteCompta=compta.filter(p=>!estExamine(p)).length;
+
+  let liste = pjCat==='tous' ? pjData : pjData.filter(p=>p.__c.cat===pjCat);
+  if(pjResteSeul) liste=liste.filter(p=>!estExamine(p));
+  if(pjFiltre) liste=liste.filter(p=>(p.TypeDetecte||'—')===pjFiltre);
+
+  const typesDispo=[...new Set((pjCat==='tous'?pjData:pjData.filter(p=>p.__c.cat===pjCat)).map(p=>p.TypeDetecte||'—'))].sort();
+  const vus=liste.filter(estExamine).length;
+
+  el.innerHTML = modHeader('📎 PJ à examiner',
+      `${resteCompta} pièce(s) à enjeu comptable restante(s) sur ${pjData.length} pièces au total`)
   + `<div class="sr">
-      ${statCard('gray',pjData.length,'Total')}
-      ${statCard('orange',reste,'À examiner')}
-      ${statCard('green',vus,'Examinées')}
-      ${statCard('blue',types.length,'Types détectés')}
-      ${statCard('red',pjData.filter(p=>String(p.TypeDetecte||'').startsWith('ERREUR')).length,'Erreurs extraction')}
+      ${statCard('orange', resteCompta, 'Comptable à traiter')}
+      ${statCard('blue',   nCat.trancher, 'À trancher')}
+      ${statCard('gray',   nCat.hors, 'Hors périmètre')}
+      ${statCard('green',  pjData.filter(estExamine).length, 'Examinées')}
+      ${statCard('red',    compta.length, 'Total comptable')}
      </div>
      <div class="tlb">
-       <button class="btn ${pjFiltre===''?'bpri':'bgho'} bsm" onclick="pjFiltre='';rPJ()">Toutes</button>
-       <button class="btn ${pjFiltre==='__reste'?'bpri':'bgho'} bsm" onclick="pjFiltre='__reste';rPJ()">⏳ Restantes (${reste})</button>
-       ${types.map(t=>`<button class="btn ${pjFiltre===t?'bpri':'bgho'} bsm" onclick="pjFiltre=${JSON.stringify(t).replace(/"/g,'&quot;')};rPJ()">${esc(t)} (${pjData.filter(p=>(p.TypeDetecte||'—')===t).length})</button>`).join('')}
+       ${['compta','trancher','hors','tous'].map(c=>{
+         const n = c==='tous'?pjData.length:nCat[c];
+         const d = c==='tous'?{lib:'Toutes',ico:'📋'}:CAT_PJ[c];
+         return `<button class="btn ${pjCat===c?'bpri':'bgho'} bsm" onclick="pjCat='${c}';pjFiltre='';rPJ()">${d.ico} ${d.lib} (${n})</button>`;
+       }).join('')}
+       <span style="width:1px;height:22px;background:var(--g200);margin:0 4px"></span>
+       <button class="btn ${pjResteSeul?'bpri':'bgho'} bsm" onclick="pjResteSeul=!pjResteSeul;rPJ()">⏳ Non examinées seulement</button>
+       ${typesDispo.length>1?`<select class="cp-sel" style="max-width:280px" onchange="pjFiltre=this.value;rPJ()">
+          <option value="">Tous les types détectés (${typesDispo.length})</option>
+          ${typesDispo.map(t=>`<option value="${esc(t)}"${pjFiltre===t?' selected':''}>${esc(t)}</option>`).join('')}
+        </select>`:''}
        <button class="btn bgho bsm" style="margin-left:auto" onclick="loadPJ()">↻ Rafraîchir</button>
      </div>
+     ${pjCat==='compta'?`<div style="padding:0 24px 10px"><div class="cp-bandeau wa"><span>🧮</span><span>
+        Filtre par défaut : seules les pièces dont le rejet touche un <strong>montant, une référence ou une affectation</strong>.
+        Les CGV, relevés, bons de livraison, devis et courriers sont masqués — basculez sur <em>Hors périmètre</em> pour les revoir.
+        Une pièce mal classée ? Elle apparaîtra dans <em>À trancher</em>.</span></div></div>`:''}
+     ${pjCat==='trancher'?`<div style="padding:0 24px 10px"><div class="cp-bandeau wa"><span>❓</span><span>
+        Pièces qu'aucun motif ne reconnaît. Si une famille revient souvent ici, dites-le moi : j'ajoute la règle
+        et elle basculera automatiquement du bon côté.</span></div></div>`:''}
+     ${bandeauColonnesPJ()}
      <div style="padding:0 24px 24px">
-       ${!liste.length?`<div class="empty"><div class="ei">📭</div><div class="et">Aucune pièce</div></div>`:`
+       ${!liste.length?`<div class="empty"><div class="ei">✅</div><div class="et">Rien à examiner</div><div class="es">Aucune pièce sur ce filtre</div></div>`:`
+       <div style="font-size:11.5px;color:var(--g400);margin-bottom:6px">${liste.length} pièce(s) affichée(s) — ${vus} examinée(s)</div>
        <div class="cptab-wrap"><table class="cptab">
-        <thead><tr><th style="width:80px">Examiné</th><th>Fichier</th><th>Type détecté</th><th>Fournisseur deviné</th><th>Raison du rejet</th><th>Date</th><th style="min-width:200px">Commentaire</th><th>Lien</th></tr></thead>
+        <thead><tr><th style="width:74px">Examiné</th><th>Catégorie</th><th>Fichier</th><th>Type détecté</th><th>Fournisseur deviné</th><th>Raison du rejet</th><th>Date</th><th style="min-width:180px">Commentaire</th><th>Lien</th></tr></thead>
         <tbody>${liste.map(p=>{
-          const i=pjData.indexOf(p), vu=estExamine(p);
-          return `<tr style="${vu?'opacity:.55':''}">
+          const i=pjData.indexOf(p), vu=estExamine(p), c=p.__c;
+          return `<tr style="${vu?'opacity:.5':''}">
             <td style="text-align:center">
-              <input type="checkbox" ${vu?'checked':''} onchange="togglePJ(${i},this.checked)" style="width:16px;height:16px;cursor:pointer">
+              <input type="checkbox" ${vu?'checked':''} ${pjColonnesOk?'':'disabled title="Colonne Examine absente de la liste"'} onchange="togglePJ(${i},this.checked)" style="width:16px;height:16px;cursor:${pjColonnesOk?'pointer':'not-allowed'}">
               ${vu&&p.ExaminePar?`<div style="font-size:9.5px;color:var(--g400);margin-top:2px" title="${esc(p.ExaminePar)} — ${esc(String(p.DateExamen||'').slice(0,10))}">${esc(String(p.ExaminePar).split(' ')[0])}</div>`:''}
             </td>
-            <td class="mono" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.FileName||'')}">${esc(p.FileName||'—')}</td>
-            <td><span class="badge ${String(p.TypeDetecte||'').startsWith('ERREUR')?'bo2':'bgr2'}">${esc(p.TypeDetecte||'—')}</span></td>
+            <td><span class="badge ${CAT_PJ[c.cat].badge}" title="${esc(CAT_PJ[c.cat].lib)}">${CAT_PJ[c.cat].ico} ${esc(c.motif)}</span></td>
+            <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.FileName||'')}">${esc(p.FileName||'—')}</td>
+            <td style="font-size:11.5px">${esc(p.TypeDetecte||'—')}</td>
             <td style="font-size:12px">${esc(p.FournisseurDevine||'—')}</td>
-            <td style="font-size:11.5px;color:var(--g500);max-width:240px">${esc(p.RaisonRejet||'—')}</td>
+            <td style="font-size:11.5px;color:var(--g500);max-width:220px">${esc(p.RaisonRejet||'—')}</td>
             <td style="font-size:11px;white-space:nowrap">${fd(p.DateTraitement)}</td>
-            <td><input class="cp-input" style="width:100%" value="${esc(p.CommentaireExamen||'')}" placeholder="note…" onchange="commentPJ(${i},this.value)"></td>
+            <td><input class="cp-input" style="width:100%" value="${esc(p.CommentaireExamen||'')}" placeholder="${pjColonnesOk?'note…':'colonne absente'}" ${pjColonnesOk?'':'disabled'} onchange="commentPJ(${i},this.value)"></td>
             <td>${p.LienFichier?`<a href="${esc(p.LienFichier)}" target="_blank" class="btn bgho bsm">📄 Ouvrir</a>`:'—'}</td>
           </tr>`;
         }).join('')}</tbody></table></div>`}
      </div>`;
 }
+
 async function togglePJ(i, val){
   const p=pjData[i]; if(!p) return;
   const avant=estExamine(p)?'Oui':'Non';
@@ -1684,15 +1874,24 @@ async function togglePJ(i, val){
     journaliser('PJ|'+(p.CleRejet||p.FileName||''), p.FileName||'', [
       {cible:'PJ à examiner',champ:'Examine',avant,apres:val?'Oui':'Non',cleLigne:''}
     ], 'Suivi d\'examen des pièces jointes');
-  }catch(e){ toast('⚠️ '+e.message,'err'); }
+  }catch(e){ toast(msgErreurColonne(e), 'err'); pjColonnesOk=false; verifierColonnesPJ().then(r=>{pjColonnesOk=r;rPJ();}); }
 }
+
+// v22 — traduire l'erreur Graph en consigne actionnable
+function msgErreurColonne(e){
+  const m=String(e&&e.message||e);
+  const f=(m.match(/Field '([^']+)' is not recognized/)||[])[1];
+  if(f) return `⚠️ La colonne « ${f} » n'existe pas dans PJAExaminer — créez-la (voir le bandeau rouge en haut de la vue)`;
+  return '⚠️ '+m;
+}
+
 async function commentPJ(i, txt){
   const p=pjData[i]; if(!p) return;
   try{
     await gWrite('PATCH', `/sites/${cfg.sid}/lists/${cfg.pjid}/items/${p._spId}/fields`, { CommentaireExamen: txt });
     p.CommentaireExamen=txt;
     toast('💬 Commentaire enregistré','ok');
-  }catch(e){ toast('⚠️ '+e.message,'err'); }
+  }catch(e){ toast(msgErreurColonne(e),'err'); }
 }
 
 // ══ MODULE : ÉCARTS À REVOIR ══════════════════════════════════
