@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v25)</title>
+<title>Tri'n'Collect — Validation Factures (v26)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -602,6 +602,7 @@ async function loadData(){
     sel.innerHTML='<option value="">Tous les établissements</option>'+etabs.map(e=>`<option value="${e}">${e}</option>`).join('');
     document.getElementById('syn').textContent='Sync '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
     if(!periodeInitialisee){ restaurePeriode(); periodeInitialisee=true; }
+    chargerReferentielAgences();   // v26 — sans attendre : la liste s'enrichit au prochain rendu
     badges(); renderTable();
     if(curV==='st')renderStats();
   }catch(e){
@@ -1261,10 +1262,36 @@ function refAvec(base, valeurs){
   valeurs.forEach(v => { if(v) s.add(String(v)); });
   return [...s].sort((a,b)=>a.localeCompare(b,'fr'));
 }
+// v26 — Le référentiel d'agences ne peut pas se limiter aux valeurs déjà
+// observées : une agence qu'aucune facture ne porte encore serait
+// impossible à sélectionner. Cas réel de « DS - Agence de déconstruction
+// sélective », que le worker sait produire mais qu'aucune facture n'avait
+// encore reçue. On part donc de la liste SharePoint MappingAgences, à
+// laquelle on ajoute les valeurs présentes et un socle non négociable.
+const AGENCES_SOCLE = [
+  'DS - Agence de déconstruction sélective',
+  'Siège'
+];
+let agencesReferentiel = null;
+
+async function chargerReferentielAgences(){
+  if(agencesReferentiel) return agencesReferentiel;
+  try{
+    const d = await gGet(`/sites/${cfg.sid}/lists/MappingAgences/items?$expand=fields&$top=500`);
+    const noms = (d.value||[]).map(it=>(it.fields||{}).Agence).filter(Boolean);
+    agencesReferentiel = [...new Set(noms)];
+    console.log(`[agences] ${agencesReferentiel.length} agence(s) depuis MappingAgences`);
+  }catch(e){
+    console.warn('[agences] MappingAgences illisible, repli sur les valeurs observées :', e.message);
+    agencesReferentiel = [];
+  }
+  return agencesReferentiel;
+}
+
 function refAgences(){
   const cour = lignesData.map(l=>lval(l,'EtablissementAffecte'));
   if(curF && curF.EtablissementAffecte) cour.push(curF.EtablissementAffecte);
-  return refAvec(etabs||[], cour);
+  return refAvec([...(etabs||[]), ...(agencesReferentiel||[]), ...AGENCES_SOCLE], cour);
 }
 function refMatieres(){ return refAvec(REF_MATIERES, lignesData.map(l=>lval(l,'Mati_x00e8_re'))); }
 function refUnites(){ return refAvec(REF_UNITES, lignesData.map(l=>lval(l,'Unite'))); }
