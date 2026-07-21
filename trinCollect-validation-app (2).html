@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v40)</title>
+<title>Tri'n'Collect — Validation Factures (v41)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -495,6 +495,8 @@ td.mono{font-family:var(--mono);font-size:12px}
       <input id="cwhr" placeholder="https://tri-n-collect.app.n8n.cloud/webhook/retraiter">
       <label>URL du fichier Sage sur SharePoint</label>
       <input id="csgurl" placeholder="https://trincollect.sharepoint.com/sites/PowerBI/Documents partages/Sage/sage-achats.json">
+      <label>URL webhook analyse d'écart (IA)</label>
+      <input id="cwha" placeholder="https://tri-n-collect.app.n8n.cloud/webhook/analyser-ecart">
       <p class="hint">Déposé chaque nuit par n8n. Copiez l'URL du fichier telle qu'affichée dans SharePoint.</p>
       <p class="hint">Reçoit en POST la liste des factures à relire. Sans cette URL, le renvoi au worker est désactivé.</p>
     </div>
@@ -523,6 +525,7 @@ const cfg={
   get ddid() {return lgs('tnc_ddid')||''},   // v27 — liste DecisionsDoublons
   get whr()  {return lgs('tnc_whr') ||''},   // v28 — webhook n8n de retraitement
   get sgurl(){return lgs('tnc_sgurl')||''},  // v29 — fichier Sage déposé sur SharePoint
+  get whAnalyse(){return lgs('tnc_wha')||''},// v41 — webhook n8n d'analyse d'écart par l'IA
 };
 function lgs(k){try{return localStorage.getItem(k)||''}catch(e){return''}}
 function lss(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -540,6 +543,7 @@ function openConfig(){
   document.getElementById('cddid').value=cfg.ddid;
   document.getElementById('cwhr').value=cfg.whr;
   document.getElementById('csgurl').value=cfg.sgurl;
+  document.getElementById('cwha').value=cfg.whAnalyse;
   document.getElementById('cfgp').classList.add('open');
 }
 function closeConfig(){document.getElementById('cfgp').classList.remove('open')}
@@ -556,6 +560,7 @@ function saveConfig(){
   lss('tnc_ddid',document.getElementById('cddid').value.trim());
   lss('tnc_whr', document.getElementById('cwhr').value.trim());
   lss('tnc_sgurl',document.getElementById('csgurl').value.trim());
+  lss('tnc_wha', document.getElementById('cwha').value.trim());
   closeConfig(); initMsal(); toast('✅ Config enregistrée','ok');
 }
 
@@ -2915,7 +2920,10 @@ function corpsSage(R){
       <td class="mono" style="text-align:right">${fa(tS)} €</td>
       <td class="mono" style="text-align:right;font-weight:600;color:var(--red)">${fa(ecart)} €</td>
       <td class="mono" style="text-align:right;color:var(--g500)">${tI?(tS/tI).toFixed(3):'—'}</td>
-      <td><button class="btn bgho bsm" onclick="openPanel('${esc(f.CleUnique)}')">Ouvrir</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn bgho bsm" onclick="openPanel('${esc(f.CleUnique)}')">Ouvrir</button>
+        <button class="btn bpri bsm" title="Faire analyser cet écart par l'IA" onclick='analyserEcartIA(${JSON.stringify(f.CleUnique)}, {sage:__sg("${esc(g.ref)}"), ecart:${ecart}})'>🔎 Analyser</button>
+      </td>
     </tr>`;});
     return `<div class="cp-bandeau wa"><span>⚠️</span><span>Le TTC lu par l'IA diffère du TTC comptabilisé (compte 401) de plus de ${TTC_TOL.toFixed(2)} €.
       Contrairement au HT, le TTC ne subit pas la doctrine de TVA non déductible : un écart ici est un <strong>vrai écart de lecture</strong>,
@@ -4221,6 +4229,8 @@ function genererCorrection(i){
 // une erreur de l'IA, c'est une facture qui ne lui est jamais parvenue.
 
 function suivi488(){ return (sageData||[]).some(g=>g.a!=null); }
+// Retrouve une pièce Sage par sa référence (pour l'analyse d'écart).
+function __sg(ref){ return (sageData||[]).find(g=>g.ref===ref) || null; }
 
 // ── Sens comptable : détecté, jamais supposé ──────────────────
 // Une charge est au débit, donc positive. Mais la convention EC_Sens
@@ -4481,7 +4491,8 @@ function rFiabilite(){
             :`<span style="color:var(--g600)">${esc(d.cIA.join(', ')||'—')}</span><br><span style="color:var(--red)">${esc(d.cSage.join(', ')||'—')}</span>`}</td>
           <td style="font-size:10.5px">${d.anaOk?'<span class="badge bg2">identiques</span>'
             :`<span style="color:var(--g600)">${esc(d.sIA.join(', ')||'—')}</span><br><span style="color:var(--red)">${esc(d.sSage.join(', ')||'—')}</span>`}</td>
-          <td><button class="btn bgho bsm" onclick="openPanel('${esc(d.f.CleUnique)}')">Ouvrir</button></td>
+          <td style="white-space:nowrap"><button class="btn bgho bsm" onclick="openPanel('${esc(d.f.CleUnique)}')">Ouvrir</button>
+            <button class="btn bpri bsm" title="Analyser l'écart avec l'IA" onclick='analyserEcartIA(${JSON.stringify(d.f.CleUnique)}, {sage:__sg("${esc(d.g.ref)}"), ecart:${d.ecart}})'>🔎</button></td>
         </tr>`).join('')}</tbody></table></div>
       ${liste.length>300?`<div style="font-size:11.5px;color:var(--g400);margin-top:8px">300 premières sur ${liste.length}.</div>`:''}`}`;
   }
@@ -4682,6 +4693,123 @@ function retraiterDepuisConsigne(id){
   const cand=[...new Set(rows.map(r=>r.Fournisseur))].find(f=>f && mot && f.toLowerCase().includes(mot.toLowerCase().split(' ')[0]));
   if(cand){ retraiterDepuisEcarts(cand); }
   else { rtMode='fournisseur'; setView('rt'); toast('Choisissez le fournisseur : le motif « '+mot+' » ne correspond à aucun nom exact'); }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v41 — ANALYSE D'ÉCART PAR L'IA
+// ═══════════════════════════════════════════════════════════════
+// « Ce que je fais dans Cowork, mais depuis l'application » : sur une
+// facture en écart, on envoie à un workflow n8n le PDF, ce que l'IA a
+// lu, ce que Sage a comptabilisé et la consigne fournisseur actuelle.
+// Claude renvoie un diagnostic et une proposition de consigne, qu'on
+// peut appliquer d'un clic dans l'éditeur de consignes.
+
+async function analyserEcartIA(cleUnique, contexte){
+  if(!cfg.whAnalyse){ toast("⚠️ Webhook d'analyse non configuré (⚙️ Paramètres)",'err'); return null; }
+  const f=rows.find(r=>r.CleUnique===cleUnique) || (contexte&&contexte.f);
+  if(!f){ toast('Facture introuvable','err'); return null; }
+
+  // Réunir le contexte que l'IA n'a pas en tête : lecture, compta, consigne.
+  const lignes=(lignesToutes||[]).filter(l=>l.CleUnique===cleUnique)
+    .map(l=>({ligne:l.NumeroLigne, designation:l.Designation, montantHT:pa(l.MontantHT),
+              compte:l.CompteComptable, agence:l.EtablissementAffecte,
+              section:sectionDe(l.EtablissementAffecte)}));
+  const consFiche = (consData||[]).find(c=>{
+    const m=(c.motif||'').toLowerCase().split(' ')[0];
+    return m && String(f.Fournisseur||'').toLowerCase().includes(m);
+  });
+
+  const payload = {
+    cleUnique, numeroFacture:f.NumeroFacture, fournisseur:f.Fournisseur, siret:f.SIRET,
+    lienFacture:f.LienFacture,
+    ia:{ totalHT:pa(f.TotalHT), totalTTC:pa(f.TotalTTC), tva:pa(f.TVA),
+         lignes, nbLignes:lignes.length },
+    sage: contexte && contexte.sage ? {
+      ttc: contexte.sage.ttc, ht: contexte.sage.ht,
+      comptes:[...(contexte.sage.comptes||[])], sections:[...(contexte.sage.sections||[])]
+    } : null,
+    ecart: contexte ? contexte.ecart : null,
+    consigneActuelle: consFiche ? {id:consFiche._spId, motif:consFiche.motif, texte:consFiche.consigne} : null,
+    utilisateur: moi()
+  };
+
+  ouvrirAnalyse('loading', f, null);
+  try{
+    const res=await fetch(cfg.whAnalyse, {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const txt=await res.text();
+    if(!res.ok) throw new Error('HTTP '+res.status+' — '+txt.slice(0,200));
+    let data; try{ data=JSON.parse(txt); }catch(e){ data={diagnostic:txt}; }
+    // n8n enveloppe parfois dans un tableau
+    if(Array.isArray(data)) data=data[0]||{};
+    if(data.output) data=data.output;
+    ouvrirAnalyse('resultat', f, data, consFiche);
+    return data;
+  }catch(e){
+    ouvrirAnalyse('erreur', f, {erreur:e.message});
+    return null;
+  }
+}
+
+function ouvrirAnalyse(etat, f, data, consFiche){
+  let corps='';
+  if(etat==='loading'){
+    corps=`<div class="cp-loading" style="padding:30px;text-align:center">
+      🔎 L'IA lit la facture et analyse l'écart…<br>
+      <span style="font-size:12px;color:var(--g400)">Téléchargement du PDF puis appel du modèle — quelques secondes.</span></div>`;
+  } else if(etat==='erreur'){
+    corps=`<div class="cp-bandeau ko"><span>⚠️</span><span>${esc(data.erreur||'Échec')}</span></div>
+      <div style="font-size:12px;color:var(--g500)">Vérifiez l'URL du webhook d'analyse et que le workflow n8n est actif.</div>`;
+  } else {
+    const conf = data.confiance ? `<span class="badge ${data.confiance>=0.8?'bg2':data.confiance>=0.5?'bo2':'br2'}">confiance ${Math.round(data.confiance*100)} %</span>` : '';
+    corps=`
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--g400);margin-bottom:4px">🩺 Diagnostic ${conf}</div>
+        <div style="font-size:13px;line-height:1.6;white-space:pre-wrap">${esc(data.diagnostic||data.analyse||'—')}</div>
+      </div>
+      ${data.cause?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--g400);margin-bottom:4px">Cause probable</div>
+        <div style="font-size:13px">${esc(data.cause)}</div></div>`:''}
+      ${data.typeProbleme?`<div style="margin-bottom:12px"><span class="badge bb2">${esc(data.typeProbleme)}</span></div>`:''}
+      ${data.consigneProposee?`
+        <div style="border:1px solid #a7d9be;border-radius:8px;overflow:hidden;margin-top:14px">
+          <div style="padding:8px 12px;background:var(--green-l);font-size:12px;font-weight:600;color:var(--green)">💡 Consigne fournisseur proposée</div>
+          <div style="padding:12px">
+            <textarea id="ana-consigne" class="cp-input" style="width:100%;min-height:70px;resize:vertical;font-family:var(--font)">${esc(data.consigneProposee)}</textarea>
+            <div style="display:flex;gap:8px;margin-top:8px;justify-content:flex-end">
+              <button class="btn bgho bsm" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('ana-consigne').value);toast('Copié')">📋 Copier</button>
+              <button class="btn bpri bsm" onclick='appliquerConsigneProposee(${JSON.stringify({four:f.Fournisseur, motif:consFiche?consFiche.motif:(f.Fournisseur||'').split(" ")[0], id:consFiche?consFiche._spId:null, siren:f.SIRET||""})})'>✅ Appliquer dans les consignes</button>
+            </div>
+          </div>
+        </div>`:''}
+      ${data.autresPistes?`<div style="margin-top:12px;font-size:12px;color:var(--g500)"><strong>Autres pistes :</strong> ${esc(data.autresPistes)}</div>`:''}`;
+  }
+  openMo(`
+    <div style="font-size:16px;font-weight:600;margin-bottom:2px">🔎 Analyse de l'écart</div>
+    <div style="font-size:12px;color:var(--g500);margin-bottom:14px">${esc(f.Fournisseur||'')} — ${esc(f.NumeroFacture||'')}
+      ${f.LienFacture?` · <a href="${esc(f.LienFacture)}" target="_blank">voir le PDF</a>`:''}</div>
+    ${corps}
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button class="btn bgho" onclick="closeMo()">Fermer</button>
+    </div>`);
+}
+
+// Applique la proposition : bascule sur l'éditeur de consignes, ouvre la
+// fiche du fournisseur (ou en crée une), et y injecte le texte proposé.
+async function appliquerConsigneProposee(info){
+  const texte=document.getElementById('ana-consigne')?.value || '';
+  closeMo();
+  if(!consData) await chargerConsignes();
+  let c = info.id ? consData.find(x=>x._spId===info.id) : null;
+  if(!c){
+    c={_spId:'NEW-'+Date.now(), motif:info.motif||'', siren:info.siren||'', consigne:'', actif:true, _new:{}, _creation:true};
+    consData.unshift(c);
+  }
+  c._new = c._new || {};
+  c._new.consigne = texte;
+  if(!c.motif && info.motif) c._new.motif = info.motif;
+  setView('co');
+  toast('💡 Consigne préremplie — vérifiez et enregistrez');
 }
 
 // ── Motif courant de correction et libellés lisibles des champs ──
