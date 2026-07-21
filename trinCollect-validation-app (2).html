@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v42)</title>
+<title>Tri'n'Collect — Validation Factures (v44)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -199,7 +199,8 @@ td.mono{font-family:var(--mono);font-size:12px}
 /* MODAL */
 #mo{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;display:none;align-items:center;justify-content:center}
 #mo.open{display:flex}
-.modal{background:white;border-radius:14px;padding:28px;max-width:460px;width:90%;box-shadow:var(--sh-lg);animation:mIn .2s ease}
+.modal{background:white;border-radius:14px;padding:28px;max-width:460px;width:90%;max-height:88vh;overflow-y:auto;box-shadow:var(--sh-lg);animation:mIn .2s ease}
+.modal.large{max-width:680px}
 @keyframes mIn{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}
 .mt2{font-size:17px;font-weight:600;margin-bottom:8px}
 .ms2{font-size:13px;color:var(--g500);margin-bottom:20px;line-height:1.6}
@@ -1115,7 +1116,7 @@ function rAbar(f){
 }
 
 // ══ MODALS ═══════════════════════════════════════════════════
-function openMo(h){document.getElementById('mb').innerHTML=h;document.getElementById('mo').classList.add('open')}
+function openMo(h,large){const mb=document.getElementById('mb');mb.innerHTML=h;mb.classList.toggle('large',!!large);document.getElementById('mo').classList.add('open');mb.scrollTop=0;}
 function closeMo(){document.getElementById('mo').classList.remove('open')}
 
 function showBlk(){
@@ -4711,36 +4712,67 @@ function retraiterDepuisConsigne(id){
 // Claude renvoie un diagnostic et une proposition de consigne, qu'on
 // peut appliquer d'un clic dans l'éditeur de consignes.
 
+// Charge à la demande les lignes d'UNE facture, même si le cache global
+// n'est pas encore prêt : sans ça, l'analyse partait avec « 0 ligne ».
+async function lignesDeFacture(cleUnique){
+  const dejaLa=(lignesToutes||[]).filter(l=>l.CleUnique===cleUnique);
+  if(dejaLa.length) return dejaLa;
+  try{
+    const flt=encodeURIComponent(`fields/CleUnique eq '${String(cleUnique).replace(/'/g,"''")}'`);
+    const d=await gGet(`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${LIGNES_SELECT})&$filter=${flt}&$top=200`);
+    return (d.value||[]).map(it=>it.fields).filter(Boolean);
+  }catch(e){ console.warn('[analyse] lignes ciblées :',e.message); return []; }
+}
+// Trouve la consigne du fournisseur : d'abord par SIREN exact, sinon par
+// le motif le PLUS SPÉCIFIQUE (le plus long) contenu dans le nom — pour
+// que « MARIA VALORISATION » l'emporte sur « MARIA ».
+function consignePour(f){
+  if(!consData) return null;
+  const siren=String(f.SIRET||'').replace(/\D/g,'').slice(0,9);
+  if(siren){
+    const parSiren=consData.find(c=>String(c.siren||'').replace(/\D/g,'').slice(0,9)===siren);
+    if(parSiren) return parSiren;
+  }
+  const nom=String(f.Fournisseur||'').toLowerCase();
+  const cand=consData.filter(c=>{ const m=(c.motif||'').toLowerCase().trim(); return m && nom.includes(m); });
+  cand.sort((a,b)=>(b.motif||'').length-(a.motif||'').length);
+  return cand[0]||null;
+}
+
 async function analyserEcartIA(cleUnique, contexte){
   if(!cfg.whAnalyse){ toast("⚠️ Webhook d'analyse non configuré (⚙️ Paramètres)",'err'); return null; }
   const f=rows.find(r=>r.CleUnique===cleUnique) || (contexte&&contexte.f);
   if(!f){ toast('Facture introuvable','err'); return null; }
 
-  // Réunir le contexte que l'IA n'a pas en tête : lecture, compta, consigne.
-  const lignes=(lignesToutes||[]).filter(l=>l.CleUnique===cleUnique)
-    .map(l=>({ligne:l.NumeroLigne, designation:l.Designation, montantHT:pa(l.MontantHT),
+  ouvrirAnalyse('loading', f, null);
+  // v43 — s'assurer que les DEUX sources sont là avant d'appeler l'IA,
+  // sinon on envoie « 0 ligne » ou « aucune consigne » à tort.
+  if(!consData){ try{ await chargerConsignes(); }catch(e){} }
+  const lignesRaw = await lignesDeFacture(cleUnique);
+
+  const lignes=lignesRaw.map(l=>({ligne:l.NumeroLigne, designation:l.Designation, montantHT:pa(l.MontantHT),
               compte:l.CompteComptable, agence:l.EtablissementAffecte,
               section:sectionDe(l.EtablissementAffecte)}));
-  const consFiche = (consData||[]).find(c=>{
-    const m=(c.motif||'').toLowerCase().split(' ')[0];
-    return m && String(f.Fournisseur||'').toLowerCase().includes(m);
-  });
+  const sommeLignes=Math.round(lignes.reduce((a,l)=>a+l.montantHT,0)*100)/100;
+  const consFiche = consignePour(f);
 
   const payload = {
     cleUnique, numeroFacture:f.NumeroFacture, fournisseur:f.Fournisseur, siret:f.SIRET,
     lienFacture:f.LienFacture,
     ia:{ totalHT:pa(f.TotalHT), totalTTC:pa(f.TotalTTC), tva:pa(f.TVA),
-         lignes, nbLignes:lignes.length },
+         lignes, nbLignes:lignes.length, sommeLignesHT:sommeLignes },
     sage: contexte && contexte.sage ? {
       ttc: contexte.sage.ttc, ht: contexte.sage.ht,
       comptes:[...(contexte.sage.comptes||[])], sections:[...(contexte.sage.sections||[])]
     } : null,
-    ecart: contexte ? contexte.ecart : null,
+    ecart: (contexte && contexte.ecart!=null) ? contexte.ecart
+           : (contexte && contexte.sage && contexte.sage.ttc!=null
+              ? Math.round((pa(f.TotalTTC)-Math.abs(contexte.sage.ttc))*100)/100 : null),
+    ecartLignesEntete: Math.round((sommeLignes-pa(f.TotalHT))*100)/100,
     consigneActuelle: consFiche ? {id:consFiche._spId, motif:consFiche.motif, texte:consFiche.consigne} : null,
     utilisateur: moi()
   };
 
-  ouvrirAnalyse('loading', f, null);
   try{
     const res=await fetch(cfg.whAnalyse, {method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
@@ -4776,10 +4808,12 @@ function ouvrirAnalyse(etat, f, data, consFiche){
       </div>
       ${data.cause?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--g400);margin-bottom:4px">Cause probable</div>
         <div style="font-size:13px">${esc(data.cause)}</div></div>`:''}
+      ${data.lignesManquantes?`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:4px">Ligne(s) manquante(s) repérée(s)</div>
+        <div style="font-size:13px;white-space:pre-wrap">${esc(data.lignesManquantes)}</div></div>`:''}
       ${data.typeProbleme?`<div style="margin-bottom:12px"><span class="badge bb2">${esc(data.typeProbleme)}</span></div>`:''}
       ${data.consigneProposee?`
         <div style="border:1px solid #a7d9be;border-radius:8px;overflow:hidden;margin-top:14px">
-          <div style="padding:8px 12px;background:var(--green-l);font-size:12px;font-weight:600;color:var(--green)">💡 Consigne fournisseur proposée</div>
+          <div style="padding:8px 12px;background:var(--green-l);font-size:12px;font-weight:600;color:var(--green)">💡 Consigne ${data.consigneEstAmelioration?'améliorée (part de l\'existante)':'proposée'}</div>
           <div style="padding:12px">
             <textarea id="ana-consigne" class="cp-input" style="width:100%;min-height:70px;resize:vertical;font-family:var(--font)">${esc(data.consigneProposee)}</textarea>
             <div style="display:flex;gap:8px;margin-top:8px;justify-content:flex-end">
@@ -4797,7 +4831,7 @@ function ouvrirAnalyse(etat, f, data, consFiche){
     ${corps}
     <div style="display:flex;justify-content:flex-end;margin-top:16px">
       <button class="btn bgho" onclick="closeMo()">Fermer</button>
-    </div>`);
+    </div>`, true);
 }
 
 // Applique la proposition : bascule sur l'éditeur de consignes, ouvre la
