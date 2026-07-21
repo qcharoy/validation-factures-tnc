@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v33)</title>
+<title>Tri'n'Collect — Validation Factures (v34)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -346,6 +346,7 @@ td.mono{font-family:var(--mono);font-size:12px}
   <div class="sbd"></div>
   <div class="sbs">
     <div class="sbl">Qualité des données</div>
+    <div class="ni" onclick="setView('fi')" data-view="fi"><span class="nic">📐</span>Fiabilité de l'IA<span class="nb gr" id="b-fi">—</span></div>
     <div class="ni" onclick="setView('ec')" data-view="ec"><span class="nic">🔍</span>Écarts à revoir<span class="nb o" id="b-ec">0</span></div>
     <div class="ni" onclick="setView('db')" data-view="db"><span class="nic">🧬</span>Doublons<span class="nb o" id="b-db">0</span></div>
     <div class="ni" onclick="setView('pj')" data-view="pj"><span class="nic">📎</span>PJ à examiner<span class="nb o" id="b-pj">—</span></div>
@@ -659,9 +660,10 @@ function setView(v){
   document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.view===v));
   const vl=document.getElementById('vlist'), vs=document.getElementById('vstat'), vm=document.getElementById('vmod');
   // v20 : trois familles de vues — liste de factures, module de contrôle, statistiques
-  if(['pj','ec','db','sg','rt','im','tb','pl'].includes(v)){
+  if(['pj','ec','db','sg','rt','im','tb','pl','fi'].includes(v)){
     vl.style.display='none'; vs.style.display='none'; vm.style.display='flex';
     if(v==='tb') loadDashboard();
+    else if(v==='fi') loadFiabilite();
     else if(v==='pl') loadPipeline();
     else if(v==='pj') loadPJ(); else if(v==='ec') loadEcarts();
     else if(v==='sg') loadSage(); else if(v==='rt') loadRetraitement();
@@ -701,6 +703,8 @@ function badges(){
     if(sageData && lignesToutes){
       const R=pipeline();
       ['e1','e2','e3','e4','e5'].forEach(k=>{ const e=document.getElementById('b-'+k); if(e) e.textContent=R[k].length; });
+      const efi=document.getElementById('b-fi');
+      if(efi && fiCache) efi.textContent=Math.round(fiCache.tx.montant*100)+' %';
     }
     const fac0=rows.filter(dansPeriode);
     document.getElementById('b-db').textContent =
@@ -3164,6 +3168,10 @@ function normaliserSage(texte, nom){
       tiers:    o.tiers ?? o.t ?? o.IntituleTiers ?? '',
       date:     String(o.date ?? o.d ?? o.date_comptable ?? '').slice(0,10),
       ht:       Math.round((Number(o.ht ?? o.h ?? 0))*100)/100,
+      // v34 — solde du compte d'attente 488. Absent des exports produits
+      // avant que le suivi ne soit ajouté au workflow : on distingue donc
+      // « pas de 488 » (null) de « 488 soldé » (0).
+      a:        (o.a ?? o.a488 ?? null) === null ? null : Math.round(Number(o.a ?? o.a488)*100)/100,
       nb:       Number(o.nb ?? o.n ?? 0),
       aux:      o.aux ?? o.CT_Num ?? '',
       sections: new Set(o.sections || o.s || []),
@@ -3636,6 +3644,8 @@ function calculerPipeline(){
     if(g.a!=null && g.a<=0.005) return;              // déjà soldé
     if(!parNorm[g.refNorm]) R.e1.push({sage:g});
   });
+  // v34 — le montant de la pièce s'appelle « ht », pas « h ». L'erreur
+  // faisait afficher NaN et versait tout dans la première étape.
 
   // Étapes 2 à 5 : côté factures lues
   vues.forEach(f=>{
@@ -3655,7 +3665,7 @@ function calculerPipeline(){
   });
 
   [ 'e2','e3','e4','e5' ].forEach(k=>R[k].sort((a,b)=>pa(b.f.TotalHT)-pa(a.f.TotalHT)));
-  R.e1.sort((a,b)=>b.sage.h-a.sage.h);
+  R.e1.sort((a,b)=>(Number(b.sage.ht)||0)-(Number(a.sage.ht)||0));
   return R;
 }
 function pipeline(force){
@@ -3663,7 +3673,7 @@ function pipeline(force){
   return pipeCache;
 }
 function montantEtape(k,R){
-  if(k==='e1') return R.e1.reduce((s,x)=>s+Math.abs(x.sage.h),0);
+  if(k==='e1') return R.e1.reduce((s,x)=>s+Math.abs(Number(x.sage.ht)||0),0);
   return R[k].reduce((s,x)=>s+pa(x.f.TotalHT),0);
 }
 
@@ -3777,9 +3787,13 @@ function rDashboard(){
   + `<div style="padding:0 24px 6px;display:flex;gap:12px;flex-wrap:wrap">
       ${['e1','e2','e3','e4','e5'].map(carte).join('')}
      </div>
-     <div style="padding:8px 24px 0;font-size:12px;color:var(--g400)">
-       Le sens de lecture : une facture entre à gauche quand Sage la comptabilise, et sort à droite quand son compte
-       d'attente <strong>${esc(impCfg.compte488)}</strong> revient à zéro.
+     <div style="padding:8px 24px 0">${suivi488()
+       ? `<div style="font-size:12px;color:var(--g400)">Le sens de lecture : une facture entre à gauche quand Sage la comptabilise,
+            et sort à droite quand son compte d'attente <strong>${esc(impCfg.compte488)}</strong> revient à zéro.</div>`
+       : `<div class="cp-bandeau wa"><span>⏳</span><span><strong>Le circuit du 488 n'est pas encore en place.</strong>
+            Les étapes ci-dessus ne peuvent donc pas encore piloter l'imputation : aucune pièce Sage ne porte de solde d'attente.
+            En attendant, l'écran qui vous sert est <strong>Fiabilité de l'IA</strong>, qui compare ce que l'IA a lu à ce que la comptabilité a saisi.
+            <button class="btn bpri bsm" style="margin-left:8px" onclick="setView('fi')">📐 Y aller</button></span></div>` }
      </div>
      <div style="padding:16px 24px 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
        <div>
@@ -3834,8 +3848,8 @@ function rPipeline(){
           <td class="mono" style="font-weight:600">${esc(g.ref)}</td>
           <td>${esc(g.tiers||'—')}</td>
           <td style="font-size:11.5px;white-space:nowrap">${esc(g.d)}</td>
-          <td class="mono" style="text-align:right">${fa(g.h)} €</td>
-          <td class="mono" style="text-align:right;color:var(--red);font-weight:600">${fa(g.a)} €</td>
+          <td class="mono" style="text-align:right">${fa(g.ht)} €</td>
+          <td class="mono" style="text-align:right;${g.a==null?'color:var(--g400)':'color:var(--red);font-weight:600'}">${g.a==null?'non suivi':fa(g.a)+' €'}</td>
           <td style="font-size:11px;color:var(--g500)">${esc((g.c||[]).slice(0,3).join(', '))}</td>
           <td><button class="btn bgho bsm" onclick="setView('pj')">Voir les PJ rejetées</button></td>
         </tr>`).join('')}</tbody></table></div>`;
@@ -3932,6 +3946,262 @@ function genererCorrection(i){
 
   toast(`📤 ${lot} — ${ecr.length} lignes de correction`,'ok');
   pipeline(true); rPipeline();
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v34 — FIABILITÉ DE L'IA
+// ═══════════════════════════════════════════════════════════════
+// Avant de faire confiance à l'IA pour imputer la comptabilité, il faut
+// savoir où elle se trompe. On compare, facture par facture, ce que
+// l'IA a produit à ce que la comptabilité a réellement saisi dans Sage :
+//
+//   · le MONTANT      — Σ des charges Sage contre Total HT lu
+//   · les COMPTES     — jeu de comptes de charge de part et d'autre
+//   · l'ANALYTIQUE    — sections Sage contre sections déduites des agences
+//
+// Le taux de LECTURE est mesuré à part : une facture non lue n'est pas
+// une erreur de l'IA, c'est une facture qui ne lui est jamais parvenue.
+
+function suivi488(){ return (sageData||[]).some(g=>g.a!=null); }
+
+const TOL_MONTANT = 0.02;
+let fiDepuis='', fiFourn='', fiCache=null, fiOnglet='synthese';
+
+function comptesUtiles(liste){
+  return new Set((liste||[]).map(c=>String(c).trim())
+    .filter(c=>c && !c.startsWith('488') && !c.startsWith('44')));
+}
+function memeEnsemble(a,b){
+  if(a.size!==b.size) return false;
+  for(const x of a) if(!b.has(x)) return false;
+  return true;
+}
+
+function analyserFiabilite(){
+  const idx = sageParNorm();
+  const parCle={};
+  (lignesToutes||[]).forEach(l=>{ (parCle[l.CleUnique]=parCle[l.CleUnique]||[]).push(l); });
+
+  // Périmètre : les pièces d'achat Sage, éventuellement à partir d'une date
+  const pieces=(sageData||[]).filter(g=>!fiDepuis || (g.date||'') >= fiDepuis);
+
+  const parNorm={};
+  rows.forEach(f=>{ const n=numNorm(f.NumeroFacture); if(n) (parNorm[n]=parNorm[n]||[]).push(f); });
+
+  const det=[], parMois={};
+  let lues=0;
+
+  pieces.forEach(g=>{
+    const mois=(g.date||'????-??').slice(0,7);
+    const M = parMois[mois] || (parMois[mois]={mois, total:0, lues:0, mtOk:0, cptOk:0, anaOk:0, ht:0});
+    M.total++; M.ht += Math.abs(Number(g.ht)||0);
+
+    const cand=parNorm[g.refNorm];
+    if(!cand || !cand.length){ det.push({g, f:null, etat:'non_lue'}); return; }
+    const f=cand[0];
+    lues++; M.lues++;
+
+    const lignes=parCle[f.CleUnique]||[];
+    const htSage=Math.round(Math.abs(Number(g.ht)||0)*100)/100;
+    const htIA  =Math.round(pa(f.TotalHT)*100)/100;
+    const ecart =Math.round((htIA-htSage)*100)/100;
+    const mtOk  = htSage>0 && Math.abs(ecart)<=TOL_MONTANT;
+
+    const cSage=comptesUtiles(g.comptes ? [...g.comptes] : []);
+    const cIA  =comptesUtiles(lignes.map(l=>l.CompteComptable));
+    const cptOk= cSage.size>0 && cIA.size>0 && memeEnsemble(cSage,cIA);
+
+    const sSage=new Set([...(g.sections||[])].map(x=>String(x).trim()).filter(Boolean));
+    const sIA  =new Set(lignes.map(l=>sectionDe(l.EtablissementAffecte)).filter(Boolean));
+    const anaOk= sSage.size>0 && sIA.size>0 && memeEnsemble(sSage,sIA);
+
+    if(mtOk)  M.mtOk++;
+    if(cptOk) M.cptOk++;
+    if(anaOk) M.anaOk++;
+
+    det.push({g, f, lignes, etat:'lue', htSage, htIA, ecart, mtOk, cptOk, anaOk,
+              ratio: htIA? Math.round(htSage/htIA*1000)/1000 : null,
+              cSage:[...cSage], cIA:[...cIA], sSage:[...sSage], sIA:[...sIA]});
+  });
+
+  const lus=det.filter(d=>d.etat==='lue');
+  const parFourn={};
+  lus.forEach(d=>{
+    const k=d.f.Fournisseur||d.g.tiers||'(sans nom)';
+    const F=parFourn[k]||(parFourn[k]={f:k, n:0, mt:0, cpt:0, ana:0, ht:0, ecart:0});
+    F.n++; F.ht+=d.htSage; F.ecart+=Math.abs(d.ecart);
+    if(d.mtOk)F.mt++; if(d.cptOk)F.cpt++; if(d.anaOk)F.ana++;
+  });
+
+  return {
+    pieces:pieces.length, lues, det, lus,
+    mois:Object.values(parMois).sort((a,b)=>a.mois.localeCompare(b.mois)),
+    fournisseurs:Object.values(parFourn).sort((a,b)=>(a.mt/a.n)-(b.mt/b.n) || b.n-a.n),
+    tx: {
+      lecture: pieces.length? lues/pieces.length : 0,
+      montant: lus.length? lus.filter(d=>d.mtOk).length/lus.length : 0,
+      comptes: lus.length? lus.filter(d=>d.cptOk).length/lus.length : 0,
+      analytique: lus.length? lus.filter(d=>d.anaOk).length/lus.length : 0
+    }
+  };
+}
+function fiab(force){ if(force||!fiCache) fiCache=analyserFiabilite(); return fiCache; }
+
+function loadFiabilite(){
+  // L'IA n'a commencé qu'en mai : comparer avant fausse tous les taux.
+  if(!fiDepuis) fiDepuis='2026-05-01';
+  rFiabilite();
+}
+
+const pc = v => Math.round(v*100);
+function jauge(label, v, n, aide){
+  const c = v>=0.95?'green' : v>=0.85?'orange' : 'red';
+  return `<div style="background:white;border:1px solid var(--g200);border-left:4px solid var(--${c});border-radius:10px;padding:14px 16px;flex:1;min-width:190px">
+    <div style="font-size:11px;color:var(--g400);text-transform:uppercase;letter-spacing:.05em">${esc(label)}</div>
+    <div style="font-size:30px;font-weight:700;color:var(--${c});font-variant-numeric:tabular-nums">${pc(v)} %</div>
+    <div style="height:5px;background:var(--g100);border-radius:3px;margin:6px 0 6px;overflow:hidden">
+      <div style="height:100%;width:${pc(v)}%;background:var(--${c})"></div></div>
+    <div style="font-size:11.5px;color:var(--g500)">${esc(n)}</div>
+    ${aide?`<div style="font-size:11px;color:var(--g400);margin-top:4px;line-height:1.5">${esc(aide)}</div>`:''}
+  </div>`;
+}
+
+function rFiabilite(){
+  const el=document.getElementById('vmod');
+  if(!sageData || !lignesToutes){
+    el.innerHTML = modHeader('📐 Fiabilité de l\'IA','Deux sources nécessaires')
+      + `<div style="padding:0 24px 24px"><div class="cp-bandeau ko"><span>⛔</span><span>
+        Il faut l'export Sage <em>et</em> les lignes comptables pour comparer. </span></div>
+        <div class="empty"><div class="ei">📐</div><div class="et">Sources incomplètes</div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+          ${!sageData?`<button class="btn bpri" onclick="setView('sg')">🔗 Charger l'export Sage</button>`:''}
+          ${!lignesToutes?`<button class="btn bpri" onclick="chargerToutesLignes().then(()=>{fiab(true);rFiabilite()})">⬇️ Charger les lignes</button>`:''}
+        </div></div></div>`;
+    return;
+  }
+
+  const A=fiab();
+  const maxM=Math.max(1,...A.mois.map(m=>m.total));
+
+  const onglets=[['synthese','📊 Synthèse'],['mois','📅 Par mois'],['fournisseur','🏭 Par fournisseur'],['detail','🔬 Détail facture']]
+    .map(([k,l])=>`<button class="btn ${fiOnglet===k?'bpri':'bgho'} bsm" onclick="fiOnglet='${k}';rFiabilite()">${l}</button>`).join('');
+
+  let corps='';
+  if(fiOnglet==='synthese'){
+    corps = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+        ${jauge('Taux de lecture', A.tx.lecture, `${A.lues} lues sur ${A.pieces} pièces Sage`,
+                "Une pièce non lue n'est pas une erreur de l'IA : le PDF ne lui est jamais parvenu.")}
+        ${jauge('Montant juste', A.tx.montant, `${A.lus.filter(d=>d.mtOk).length} / ${A.lus.length} factures`,
+                'Total HT lu contre charges comptabilisées, à 2 centimes près.')}
+        ${jauge('Comptes justes', A.tx.comptes, `${A.lus.filter(d=>d.cptOk).length} / ${A.lus.length}`,
+                "Mêmes comptes de charge de part et d'autre, TVA et 488 exclus.")}
+        ${jauge('Analytique juste', A.tx.analytique, `${A.lus.filter(d=>d.anaOk).length} / ${A.lus.length}`,
+                "Sections Sage contre sections déduites des agences affectées par l'IA.")}
+      </div>
+      <div class="cp-bandeau ${A.tx.montant>=0.95?'ok':'wa'}"><span>${A.tx.montant>=0.95?'✅':'⚠️'}</span><span>
+        ${A.tx.montant>=0.95
+          ? `Sur le périmètre lu, l'IA retrouve le bon montant dans <strong>${pc(A.tx.montant)} %</strong> des cas. C'est le seuil à partir duquel l'imputation automatique devient raisonnable.`
+          : `L'IA retrouve le bon montant dans <strong>${pc(A.tx.montant)} %</strong> des cas. En dessous de 95 %, regardez l'onglet <em>Par fournisseur</em> : les erreurs sont presque toujours concentrées sur quelques-uns.`}
+        </span></div>
+      <div style="margin-top:14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--g400);margin-bottom:8px">Les 8 fournisseurs les plus problématiques</div>
+      <div class="cptab-wrap"><table class="cptab">
+        <thead><tr><th>Fournisseur</th><th style="text-align:center">Factures</th><th style="text-align:right">HT</th>
+          <th style="text-align:center">Montant</th><th style="text-align:center">Comptes</th><th style="text-align:center">Analytique</th><th></th></tr></thead>
+        <tbody>${A.fournisseurs.filter(F=>F.mt<F.n).slice(0,8).map(F=>`<tr>
+          <td style="font-weight:600;font-size:12px">${esc(F.f)}</td>
+          <td style="text-align:center">${F.n}</td>
+          <td class="mono" style="text-align:right">${fa(F.ht)} €</td>
+          ${[['mt',F.mt],['cpt',F.cpt],['ana',F.ana]].map(([,v])=>{
+            const r=v/F.n; return `<td style="text-align:center"><span class="badge ${r>=0.95?'bg2':r>=0.7?'bo2':'br2'}">${pc(r)} %</span></td>`;}).join('')}
+          <td><button class="btn bgho bsm" onclick="fiFourn=${JSON.stringify(F.f).replace(/"/g,'&quot;')};fiOnglet='detail';rFiabilite()">Voir</button></td>
+        </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:20px">Aucun fournisseur en défaut</td></tr>'}</tbody></table></div>`;
+  }
+  else if(fiOnglet==='mois'){
+    corps = `<div class="cp-bandeau wa"><span>📅</span><span>La lecture par l'IA a démarré en mai 2026.
+        Les mois antérieurs affichent un taux de lecture faible : c'est attendu, pas une défaillance.</span></div>
+      <div class="cptab-wrap"><table class="cptab">
+        <thead><tr><th>Mois</th><th>Volume Sage</th><th style="text-align:center">Pièces</th><th style="text-align:center">Lues</th>
+          <th style="text-align:center">Taux lecture</th><th style="text-align:center">Montant OK</th>
+          <th style="text-align:center">Comptes OK</th><th style="text-align:center">Analytique OK</th><th style="text-align:right">HT</th></tr></thead>
+        <tbody>${A.mois.map(m=>{
+          const tl=m.total?m.lues/m.total:0;
+          const b=(v,d)=>d?`<span class="badge ${v/d>=0.95?'bg2':v/d>=0.7?'bo2':'br2'}">${pc(v/d)} %</span>`:'—';
+          return `<tr>
+            <td class="mono" style="font-weight:600">${esc(m.mois)}</td>
+            <td style="width:180px"><div style="height:8px;background:var(--g100);border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:${Math.round(m.total/maxM*100)}%;background:var(--green)"></div></div></td>
+            <td style="text-align:center">${m.total}</td>
+            <td style="text-align:center">${m.lues}</td>
+            <td style="text-align:center"><span class="badge ${tl>=0.9?'bg2':tl>=0.5?'bo2':'br2'}">${pc(tl)} %</span></td>
+            <td style="text-align:center">${b(m.mtOk,m.lues)}</td>
+            <td style="text-align:center">${b(m.cptOk,m.lues)}</td>
+            <td style="text-align:center">${b(m.anaOk,m.lues)}</td>
+            <td class="mono" style="text-align:right">${fa(m.ht)} €</td>
+          </tr>`;}).join('')}</tbody></table></div>`;
+  }
+  else if(fiOnglet==='fournisseur'){
+    corps = `<div class="cptab-wrap"><table class="cptab">
+        <thead><tr><th>Fournisseur</th><th style="text-align:center">Factures</th><th style="text-align:right">HT comptabilisé</th>
+          <th style="text-align:right">Écart cumulé</th><th style="text-align:center">Montant</th>
+          <th style="text-align:center">Comptes</th><th style="text-align:center">Analytique</th><th></th></tr></thead>
+        <tbody>${A.fournisseurs.map(F=>`<tr>
+          <td style="font-weight:600;font-size:12px">${esc(F.f)}</td>
+          <td style="text-align:center">${F.n}</td>
+          <td class="mono" style="text-align:right">${fa(F.ht)} €</td>
+          <td class="mono" style="text-align:right;${F.ecart>1?'color:var(--red)':''}">${fa(F.ecart)} €</td>
+          ${[F.mt,F.cpt,F.ana].map(v=>{const r=v/F.n;
+            return `<td style="text-align:center"><span class="badge ${r>=0.95?'bg2':r>=0.7?'bo2':'br2'}">${pc(r)} %</span></td>`;}).join('')}
+          <td style="white-space:nowrap">
+            <button class="btn bgho bsm" onclick="fiFourn=${JSON.stringify(F.f).replace(/"/g,'&quot;')};fiOnglet='detail';rFiabilite()">Détail</button>
+            <button class="btn bgho bsm" title="Corriger la consigne puis relire" onclick='retraiterDepuisEcarts(${JSON.stringify(F.f)})'>🔄</button>
+          </td>
+        </tr>`).join('')}</tbody></table></div>`;
+  }
+  else {
+    const liste=A.lus.filter(d=>!fiFourn || (d.f.Fournisseur||d.g.tiers)===fiFourn)
+                     .filter(d=>!(d.mtOk&&d.cptOk&&d.anaOk))
+                     .sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart));
+    corps = `<div class="tlb" style="padding-left:0">
+        <span class="flab">Fournisseur</span>
+        <select class="fs" style="min-width:280px" onchange="fiFourn=this.value;rFiabilite()">
+          <option value="">— tous —</option>
+          ${A.fournisseurs.map(F=>`<option${fiFourn===F.f?' selected':''}>${esc(F.f)}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:var(--g400)">${liste.length} facture(s) en écart</span>
+      </div>
+      ${!liste.length?`<div class="empty"><div class="ei">✅</div><div class="et">Aucun écart sur ce périmètre</div></div>`:`
+      <div class="cptab-wrap"><table class="cptab">
+        <thead><tr><th>N° facture</th><th>Fournisseur</th><th>Date</th>
+          <th style="text-align:right">HT IA</th><th style="text-align:right">HT Sage</th><th style="text-align:right">Écart</th><th style="text-align:right">Ratio</th>
+          <th>Comptes IA / Sage</th><th>Sections IA / Sage</th><th></th></tr></thead>
+        <tbody>${liste.slice(0,300).map(d=>`<tr>
+          <td class="mono" style="font-size:11.5px;font-weight:600">${esc(d.f.NumeroFacture||d.g.ref)}</td>
+          <td style="font-size:11.5px">${esc(d.f.Fournisseur||d.g.tiers||'—')}</td>
+          <td style="font-size:11px;white-space:nowrap">${fd(d.f.DateFacture)}</td>
+          <td class="mono" style="text-align:right">${fa(d.htIA)} €</td>
+          <td class="mono" style="text-align:right">${fa(d.htSage)} €</td>
+          <td class="mono" style="text-align:right;${d.mtOk?'':'color:var(--red);font-weight:600'}">${fa(d.ecart)} €</td>
+          <td class="mono" style="text-align:right;color:var(--g500)">${d.ratio??'—'}</td>
+          <td style="font-size:10.5px">${d.cptOk?'<span class="badge bg2">identiques</span>'
+            :`<span style="color:var(--g600)">${esc(d.cIA.join(', ')||'—')}</span><br><span style="color:var(--red)">${esc(d.cSage.join(', ')||'—')}</span>`}</td>
+          <td style="font-size:10.5px">${d.anaOk?'<span class="badge bg2">identiques</span>'
+            :`<span style="color:var(--g600)">${esc(d.sIA.join(', ')||'—')}</span><br><span style="color:var(--red)">${esc(d.sSage.join(', ')||'—')}</span>`}</td>
+          <td><button class="btn bgho bsm" onclick="openPanel('${esc(d.f.CleUnique)}')">Ouvrir</button></td>
+        </tr>`).join('')}</tbody></table></div>
+      ${liste.length>300?`<div style="font-size:11.5px;color:var(--g400);margin-top:8px">300 premières sur ${liste.length}.</div>`:''}`}`;
+  }
+
+  el.innerHTML = modHeader('📐 Fiabilité de l\'IA',
+      `${A.pieces} pièce(s) Sage analysée(s)${fiDepuis?` depuis le ${new Date(fiDepuis).toLocaleDateString('fr-FR')}`:''} · ${A.lues} lue(s) par l'IA`)
+   + `<div class="tlb">${onglets}
+        <span class="fsep"></span>
+        <span class="flab">Comparer depuis</span>
+        <input type="date" class="fdate" value="${fiDepuis}" onchange="fiDepuis=this.value;fiab(true);rFiabilite()">
+        <button class="btn bgho bsm" onclick="fiDepuis='';fiab(true);rFiabilite()">Tout</button>
+        <button class="btn bgho bsm" style="margin-left:auto" onclick="fiab(true);rFiabilite()">↻ Recalculer</button>
+      </div>
+      <div style="padding:0 24px 24px">${corps}</div>`;
 }
 
 // ── Motif courant de correction et libellés lisibles des champs ──
