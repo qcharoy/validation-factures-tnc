@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v23)</title>
+<title>Tri'n'Collect — Validation Factures (v25)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -88,6 +88,13 @@ body{font-family:var(--font);font-size:14px;color:var(--g800);background:var(--g
 .sbx{position:relative;flex:1;max-width:320px}
 .sbx input{width:100%;background:white;border:1px solid var(--g200);border-radius:8px;padding:7px 12px 7px 32px;font-size:13px;font-family:var(--font);color:var(--g800);outline:none;transition:border-color .15s}
 .sbx input:focus{border-color:var(--green)}
+/* v24 — contrôles de période */
+.fsep{width:1px;height:22px;background:var(--g200);margin:0 2px}
+.flab{font-size:11.5px;color:var(--g400);font-weight:500}
+.fdate{border:1px solid var(--g200);border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:var(--font);color:var(--g800);outline:none;background:white;transition:border-color .15s}
+.fdate:focus{border-color:var(--green)}
+.fres{font-size:11.5px;color:var(--g400);white-space:nowrap}
+.fres strong{color:var(--g700)}
 .sbx::before{content:'🔍';position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12px;pointer-events:none}
 select.fs{background:white;border:1px solid var(--g200);border-radius:8px;padding:7px 10px;font-size:13px;font-family:var(--font);color:var(--g700);outline:none;cursor:pointer}
 select.fs:focus{border-color:var(--green)}
@@ -336,6 +343,7 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="sbl">Contrôles</div>
     <div class="ni" onclick="setView('ec')" data-view="ec"><span class="nic">🔍</span>Écarts à revoir<span class="nb o" id="b-ec">0</span></div>
     <div class="ni" onclick="setView('pj')" data-view="pj"><span class="nic">📎</span>PJ à examiner<span class="nb o" id="b-pj">0</span></div>
+    <div class="ni" onclick="setView('db')" data-view="db"><span class="nic">🧬</span>Doublons<span class="nb o" id="b-db">0</span></div>
   </div>
   <div class="sbd"></div>
   <div class="sbs">
@@ -353,12 +361,26 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="tlb">
       <div class="sbx"><input type="text" id="sq" placeholder="Fournisseur, n° facture…" oninput="renderTable()"></div>
       <select class="fs" id="fe" onchange="renderTable()"><option value="">Tous les établissements</option></select>
-      <select class="fs" id="fp" onchange="renderTable()">
-        <option value="">Toute période</option>
-        <option value="7">7 jours</option>
-        <option value="30">30 jours</option>
-        <option value="90">90 jours</option>
+      <span class="fsep"></span>
+      <select class="fs" id="fchamp" onchange="onPeriodeChange()" title="Sur quelle date porte le filtre">
+        <option value="DateFacture">📅 Date de facture</option>
+        <option value="DateTraitement">⚙️ Date de traitement</option>
       </select>
+      <select class="fs" id="fp" onchange="onPresetChange()">
+        <option value="mois">Mois en cours</option>
+        <option value="mois-1">Mois dernier</option>
+        <option value="3m">3 derniers mois</option>
+        <option value="6m">6 derniers mois</option>
+        <option value="annee">Année en cours</option>
+        <option value="perso">Dates personnalisées…</option>
+        <option value="">Toute période</option>
+      </select>
+      <span id="fdates" style="display:none;align-items:center;gap:6px">
+        <label class="flab">du</label><input type="date" class="fdate" id="fdu" onchange="onDateManuelle()">
+        <label class="flab">au</label><input type="date" class="fdate" id="fau" onchange="onDateManuelle()">
+      </span>
+      <span id="fresume" class="fres"></span>
+      <button class="btn bgho bsm" id="fraz" style="display:none" onclick="razPeriode()">✕ Réinitialiser</button>
     </div>
     <div class="tw">
       <table>
@@ -546,6 +568,7 @@ msalApp.handleRedirectPromise().then(resp=>{
 
 // ══ STATE ════════════════════════════════════════════════════
 let rows=[],etabs=[],cmts={},curV='av',curF=null,sCol='DateFacture',sDir=-1;
+let periodeInitialisee=false;   // v24
 const STAT={
   'À valider':{c:'bo2',i:'⏳'},'Approuvé N1':{c:'bb2',i:'✓'},'Approuvé N2':{c:'bb2',i:'✓✓'},
   'Approuvé N3':{c:'bb2',i:'✓✓✓'},'Approuvé N4':{c:'bb2',i:'✓✓✓✓'},
@@ -578,6 +601,7 @@ async function loadData(){
     const sel=document.getElementById('fe');
     sel.innerHTML='<option value="">Tous les établissements</option>'+etabs.map(e=>`<option value="${e}">${e}</option>`).join('');
     document.getElementById('syn').textContent='Sync '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    if(!periodeInitialisee){ restaurePeriode(); periodeInitialisee=true; }
     badges(); renderTable();
     if(curV==='st')renderStats();
   }catch(e){
@@ -600,9 +624,9 @@ function setView(v){
   document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.view===v));
   const vl=document.getElementById('vlist'), vs=document.getElementById('vstat'), vm=document.getElementById('vmod');
   // v20 : trois familles de vues — liste de factures, module de contrôle, statistiques
-  if(v==='pj'||v==='ec'){
+  if(v==='pj'||v==='ec'||v==='db'){
     vl.style.display='none'; vs.style.display='none'; vm.style.display='flex';
-    if(v==='pj') loadPJ(); else loadEcarts();
+    if(v==='pj') loadPJ(); else if(v==='ec') loadEcarts(); else loadDoublons();
     return;
   }
   vm.style.display='none';
@@ -631,9 +655,100 @@ function badges(){
     marquerDoublons();
     const nEc=rows.filter(r=>Object.keys(ECARTS).some(k=>ECARTS[k].f(r))).length;
     document.getElementById('b-ec').textContent=nEc;
+    const fac0=rows.filter(dansPeriode);
+    document.getElementById('b-db').textContent =
+      Object.keys(DBL_FACTURE).reduce((n,k)=>n+grouperPar(fac0,DBL_FACTURE[k].k).length,0);
     const nPj=pjData.length?pjData.filter(p=>(p.__c||classerPJ(p)).cat==='compta'&&!estExamine(p)).length:'—';
     document.getElementById('b-pj').textContent=nPj;
   }catch(e){ /* modules pas encore chargés */ }
+}
+
+// ══ v24 — FILTRE DE PÉRIODE ══════════════════════════════════
+// Deux champs possibles (date de facture / date de traitement), des
+// raccourcis relatifs et un intervalle libre. Par défaut : 3 derniers
+// mois sur la date de facture — l'historique complet (2400 factures)
+// ralentissait l'affichage sans servir au quotidien.
+// Format AAAA-MM-JJ à partir des composantes LOCALES.
+// toISOString() passerait par UTC : minuit à Paris deviendrait la veille
+// 22 h en UTC, et tous les débuts de mois reculeraient d'un jour.
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+function bornesPreset(k){
+  const n=new Date(), a=n.getFullYear(), m=n.getMonth();
+  switch(k){
+    case 'mois':   return [new Date(a,m,1),        new Date(a,m+1,0)];
+    case 'mois-1': return [new Date(a,m-1,1),      new Date(a,m,0)];
+    case '3m':     return [new Date(a,m-2,1),      new Date(a,m+1,0)];
+    case '6m':     return [new Date(a,m-5,1),      new Date(a,m+1,0)];
+    case 'annee':  return [new Date(a,0,1),        new Date(a,11,31)];
+    default:       return [null,null];
+  }
+}
+function litPeriode(){
+  return {
+    champ:  document.getElementById('fchamp')?.value || 'DateFacture',
+    preset: document.getElementById('fp')?.value ?? '3m',
+    du:     document.getElementById('fdu')?.value || '',
+    au:     document.getElementById('fau')?.value || ''
+  };
+}
+function appliquePresetAuxChamps(){
+  const {preset}=litPeriode();
+  const zone=document.getElementById('fdates');
+  zone.style.display = preset==='perso' ? 'flex' : 'none';
+  if(preset && preset!=='perso'){
+    const [d1,d2]=bornesPreset(preset);
+    document.getElementById('fdu').value = d1?iso(d1):'';
+    document.getElementById('fau').value = d2?iso(d2):'';
+  }
+  if(preset===''){ document.getElementById('fdu').value=''; document.getElementById('fau').value=''; }
+}
+function memorisePeriode(){
+  const p=litPeriode();
+  lss('tnc_per', JSON.stringify(p));
+}
+function restaurePeriode(){
+  let p={champ:'DateFacture',preset:'3m',du:'',au:''};
+  try{ const j=JSON.parse(lgs('tnc_per')||'null'); if(j&&j.preset!==undefined) p=j; }catch(e){}
+  document.getElementById('fchamp').value=p.champ||'DateFacture';
+  document.getElementById('fp').value=p.preset??'3m';
+  appliquePresetAuxChamps();
+  if(p.preset==='perso'){ document.getElementById('fdu').value=p.du||''; document.getElementById('fau').value=p.au||''; }
+  majResumePeriode();
+}
+function onPresetChange(){ appliquePresetAuxChamps(); memorisePeriode(); majResumePeriode(); renderTable(); }
+function onPeriodeChange(){ memorisePeriode(); majResumePeriode(); renderTable(); }
+function onDateManuelle(){
+  const du=document.getElementById('fdu').value, au=document.getElementById('fau').value;
+  if(du&&au&&du>au){ toast('⚠️ La date de début est postérieure à la date de fin','err'); return; }
+  document.getElementById('fp').value='perso';
+  document.getElementById('fdates').style.display='flex';
+  memorisePeriode(); majResumePeriode(); renderTable();
+}
+function razPeriode(){
+  document.getElementById('fchamp').value='DateFacture';
+  document.getElementById('fp').value='3m';
+  appliquePresetAuxChamps(); memorisePeriode(); majResumePeriode(); renderTable();
+}
+function majResumePeriode(){
+  const {champ,preset,du,au}=litPeriode();
+  const el=document.getElementById('fresume'), raz=document.getElementById('fraz');
+  const lib = champ==='DateFacture'?'date de facture':'date de traitement';
+  if(!preset && !du && !au){ el.innerHTML=`sur <strong>toutes</strong> les ${lib}s`; }
+  else if(du||au){
+    const f=x=>x?new Date(x+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'}):'…';
+    el.innerHTML=`${lib} du <strong>${f(du)}</strong> au <strong>${f(au)}</strong>`;
+  } else el.textContent='';
+  raz.style.display = (preset==='3m'&&champ==='DateFacture') ? 'none' : 'inline-flex';
+}
+// Retourne true si la ligne est dans la période retenue
+function dansPeriode(x){
+  const {champ,du,au}=litPeriode();
+  if(!du&&!au) return true;
+  const d=pd(x[champ] || (champ==='DateTraitement'?x.DateFacture:x.DateTraitement));
+  if(!d) return false;                      // date absente : exclue d'un filtre daté
+  if(du && d < new Date(du+'T00:00:00')) return false;
+  if(au && d > new Date(au+'T23:59:59')) return false;
+  return true;
 }
 
 // ══ TABLE ════════════════════════════════════════════════════
@@ -645,8 +760,7 @@ function getRows(){
   if(q)r=r.filter(x=>(x.Fournisseur||'').toLowerCase().includes(q)||(x.NumeroFacture||'').toLowerCase().includes(q)||(x.CleUnique||'').toLowerCase().includes(q));
   const et=document.getElementById('fe')?.value;
   if(et)r=r.filter(x=>(x.EtablissementAffecte||'')===et);
-  const p=parseInt(document.getElementById('fp')?.value);
-  if(p){const cut=new Date();cut.setDate(cut.getDate()-p);r=r.filter(x=>{const d=pd(x.DateTraitement||x.DateFacture);return d&&d>=cut;});}
+  r=r.filter(dansPeriode);   // v24
   r.sort((a,b)=>{
     let va=a[sCol]||'',vb=b[sCol]||'';
     if(sCol==='TotalTTC'){va=pa(va);vb=pa(vb);}
@@ -664,6 +778,13 @@ function renderTable(){
   }
   const ttc=r.reduce((s,x)=>s+pa(x.TotalTTC),0);
   const n=r.length,bl=r.filter(x=>x.Statut==='Bloqué').length,urg=r.filter(x=>isUrg(x)).length,ec=r.filter(x=>x.Statut?.startsWith('Approuvé')).length;
+  // v24 — signaler ce que la période écarte, pour qu'on ne cherche pas
+  // en vain une facture ancienne filtrée sans s'en rendre compte
+  try{
+    const vc0=VIEWS[curV], horsPeriode=vc0?rows.filter(vc0.f).filter(x=>!dansPeriode(x)).length:0;
+    const sub=document.getElementById('pst');
+    if(sub&&vc0) sub.innerHTML = esc(vc0.s) + (horsPeriode?` · <span style="color:var(--orange)">${horsPeriode} facture(s) hors période</span>`:'');
+  }catch(e){}
   document.getElementById('sr').innerHTML=[
     ['gray',n,'Total affiché'],['blue',ec,'En circuit'],['red',bl,'Bloquées'],['orange',urg,'Échéances proches'],['green',fa(ttc)+' €','TTC total']
   ].map(([col,v,l])=>`<div class="sc2"><div class="sv2">${v}</div><div class="sl2"><span class="sd" style="background:var(--${col})"></span>${l}</div></div>`).join('');
@@ -1974,6 +2095,290 @@ function modHeader(titre, sous){
 }
 function statCard(col, val, lib){
   return `<div class="sc2"><div class="sv2">${val}</div><div class="sl2"><span class="sd" style="background:var(--${col})"></span>${esc(lib)}</div></div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v25 — CONTRÔLES DE DOUBLONS
+// ═══════════════════════════════════════════════════════════════
+// Deux niveaux : sur les en-têtes (immédiat, les factures sont déjà
+// chargées) et sur les lignes (à la demande, il faut aller chercher
+// LignesFacture qui pèse plusieurs dizaines de milliers d'entrées).
+
+const r2c = n => Math.round(pa(n)*100)/100;
+const siren9 = r => String(r.SIRET||'').replace(/\D/g,'').slice(0,9);
+const cleFour = r => siren9(r) || String(r.Fournisseur||'').toUpperCase().trim();
+
+// ── Règles sur les en-têtes ───────────────────────────────────
+const DBL_FACTURE = {
+  num: {
+    t:'Numéro identique', g:'ko',
+    d:"Même fournisseur et même numéro de facture normalisé. Doublon franc : une des deux fiches est à supprimer.",
+    k:r=>{ const n=numNorm(r.NumeroFacture); return n?cleFour(r)+'|N|'+n:null; }
+  },
+  ttc: {
+    t:'Même TTC, numéros différents', g:'wa',
+    d:"Même fournisseur, même montant TTC, mais des numéros distincts. Souvent légitime (abonnement, forfait mensuel) — à ne JAMAIS fusionner automatiquement, seulement à vérifier.",
+    k:r=>{ const m=r2c(r.TotalTTC); return m?cleFour(r)+'|T|'+m.toFixed(2):null; }
+  },
+  ttcdate: {
+    t:'Même TTC et même date', g:'ko',
+    d:"Même fournisseur, même montant et même date de facture. Signature très forte d'une double saisie.",
+    k:r=>{ const m=r2c(r.TotalTTC), d=pd(r.DateFacture); return (m&&d)?cleFour(r)+'|D|'+m.toFixed(2)+'|'+iso(d):null; }
+  },
+  pdf: {
+    t:'Même fichier PDF', g:'ko',
+    d:"Deux fiches pointent le même document source : le PDF a été traité deux fois.",
+    k:r=>{ const l=String(r.LienFacture||'').trim(); return l?'P|'+l:null; }
+  }
+};
+
+function grouperPar(liste, fnCle){
+  const g={};
+  liste.forEach(x=>{ const k=fnCle(x); if(k) (g[k]=g[k]||[]).push(x); });
+  return Object.values(g).filter(l=>l.length>1);
+}
+
+// ── Règles sur les lignes ─────────────────────────────────────
+const DBL_LIGNE = {
+  bon: {
+    t:'Bon facturé plusieurs fois', g:'ko',
+    d:"Le même numéro de bon apparaît sur plusieurs factures du même fournisseur. Un bon de pesée ou de livraison est unique : c'est le contrôle qui détecte réellement une double facturation.",
+    k:l=>{ const b=String(l.NumBon||'').toUpperCase().replace(/[^A-Z0-9]/g,''); 
+           return (b&&b.length>=4)?l.__four+'|B|'+b:null; },
+    inter:true
+  },
+  interne: {
+    t:'Ligne dupliquée dans la facture', g:'wa',
+    d:"Deux lignes strictement identiques (bon, matière, quantité, montant) au sein d'une même facture. Parfois légitime — deux rotations le même jour — mais à vérifier.",
+    k:l=>{ const b=String(l.NumBon||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+           const m=r2c(l.MontantHT); if(!m) return null;
+           return l.CleUnique+'|I|'+b+'|'+(l.Mati_x00e8_re||'')+'|'+r2c(l.Quantite)+'|'+m.toFixed(2); },
+    inter:false
+  },
+  presta: {
+    t:'Prestation refacturée', g:'ko',
+    d:"Même chantier, même date de rotation, même matière et même quantité sur deux factures différentes. Typiquement un bon repris dans un récapitulatif mensuel après avoir déjà été facturé à l'unité.",
+    k:l=>{ const c=String(l.Chantier||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+           const d=pd(l.DateRotation); const q=r2c(l.Quantite);
+           if(!c||!d||!q) return null;
+           return l.__four+'|R|'+c+'|'+iso(d)+'|'+(l.Mati_x00e8_re||'')+'|'+q; },
+    inter:true
+  },
+  calcul: {
+    t:'Quantité × PU ≠ Montant', g:'wa',
+    d:"Incohérence arithmétique de la ligne. Ce n'est pas un doublon, mais c'est la même famille d'erreur de lecture — et l'écart se retrouve directement en compta.",
+    special:'calcul'
+  }
+};
+
+let lignesToutes=null, dblEnCours=false, dblCat='num', dblScope='periode';
+
+// ── Chargement des lignes (à la demande) ──────────────────────
+async function chargerToutesLignes(){
+  if(lignesToutes) return lignesToutes;
+  dblEnCours=true; rDoublons();
+  const flds='CleUnique,NumeroLigne,NumBon,Chantier,DateRotation,Mati_x00e8_re,Quantite,PUHT,MontantHT,Designation';
+  let url=`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${flds})&$top=999`;
+  const acc=[];
+  try{
+    while(url){
+      const d=await gGet(url);
+      (d.value||[]).forEach(it=>{ if(it.fields) acc.push(it.fields); });
+      url=d['@odata.nextLink']?d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
+      const el=document.getElementById('dbl-prog');
+      if(el) el.textContent=`${acc.length} ligne(s) chargée(s)…`;
+    }
+    // Rattacher le fournisseur : il n'est pas fiable sur la ligne,
+    // on le prend sur l'en-tête via CleUnique.
+    const parCle={}; rows.forEach(r=>parCle[r.CleUnique]=r);
+    acc.forEach(l=>{ const f=parCle[l.CleUnique]; l.__four=f?cleFour(f):'?'; l.__fnom=f?f.Fournisseur:'—';
+                     l.__num=f?f.NumeroFacture:'—'; l.__date=f?f.DateFacture:''; });
+    lignesToutes=acc;
+  }catch(e){
+    toast('⚠️ Chargement des lignes : '+e.message,'err');
+    lignesToutes=[];
+  }
+  dblEnCours=false; rDoublons();
+  return lignesToutes;
+}
+
+// ── Périmètre d'analyse ───────────────────────────────────────
+function facturesDuScope(){
+  return dblScope==='periode' ? rows.filter(dansPeriode) : rows;
+}
+
+function loadDoublons(){ rDoublons(); }
+
+function rDoublons(){
+  const el=document.getElementById('vmod');
+  const fac=facturesDuScope();
+  const clesScope=new Set(fac.map(r=>r.CleUnique));
+
+  // Comptages en-têtes
+  const nFac={};
+  Object.keys(DBL_FACTURE).forEach(k=>{ nFac[k]=grouperPar(fac, DBL_FACTURE[k].k).length; });
+
+  // Comptages lignes (si chargées)
+  const nLig={}; let lignesScope=[];
+  if(lignesToutes){
+    lignesScope=lignesToutes.filter(l=>clesScope.has(l.CleUnique));
+    Object.keys(DBL_LIGNE).forEach(k=>{
+      nLig[k] = DBL_LIGNE[k].special==='calcul'
+        ? lignesScope.filter(ligneIncoherente).length
+        : grouperPar(lignesScope, DBL_LIGNE[k].k).filter(g=>!DBL_LIGNE[k].inter || new Set(g.map(x=>x.CleUnique)).size>1).length;
+    });
+  }
+
+  const surLignes = !!DBL_LIGNE[dblCat];
+  const total = Object.values(nFac).reduce((a,b)=>a+b,0);
+
+  el.innerHTML = modHeader('🧬 Doublons',
+     `${total} groupe(s) suspect(s) sur les en-têtes` + (lignesToutes?` · ${Object.values(nLig).reduce((a,b)=>a+b,0)} sur les lignes`:''))
+  + `<div class="sr" style="grid-template-columns:repeat(4,1fr)">
+      ${statCard('red',   nFac.num+nFac.ttcdate+nFac.pdf, 'Doublons francs')}
+      ${statCard('orange',nFac.ttc, 'Même TTC à vérifier')}
+      ${statCard('gray',  fac.length, 'Factures analysées')}
+      ${statCard('blue',  lignesToutes?lignesScope.length:'—', 'Lignes analysées')}
+     </div>
+     <div class="tlb">
+       <span class="flab">Périmètre</span>
+       <select class="fs" onchange="dblScope=this.value;rDoublons()">
+         <option value="periode"${dblScope==='periode'?' selected':''}>Période affichée</option>
+         <option value="tout"${dblScope==='tout'?' selected':''}>Tout l'historique</option>
+       </select>
+       <span class="fsep"></span>
+       ${Object.keys(DBL_FACTURE).map(k=>`<button class="btn ${dblCat===k?'bpri':'bgho'} bsm" onclick="dblCat='${k}';rDoublons()">${DBL_FACTURE[k].g==='ko'?'🔴':'⚠️'} ${esc(DBL_FACTURE[k].t)} (${nFac[k]})</button>`).join('')}
+     </div>
+     <div class="tlb" style="padding-top:0">
+       <span class="flab">Lignes</span>
+       ${Object.keys(DBL_LIGNE).map(k=>`<button class="btn ${dblCat===k?'bpri':'bgho'} bsm" onclick="dblCat='${k}';(lignesToutes?rDoublons():chargerToutesLignes())">${DBL_LIGNE[k].g==='ko'?'🔴':'⚠️'} ${esc(DBL_LIGNE[k].t)}${lignesToutes?` (${nLig[k]})`:''}</button>`).join('')}
+       ${lignesToutes?`<button class="btn bgho bsm" onclick="lignesToutes=null;chargerToutesLignes()">↻ Recharger les lignes</button>`:''}
+     </div>
+     <div style="padding:0 24px 10px">
+       <div class="cp-bandeau ${(DBL_FACTURE[dblCat]||DBL_LIGNE[dblCat]).g==='ko'?'ko':'wa'}">
+         <span>${(DBL_FACTURE[dblCat]||DBL_LIGNE[dblCat]).g==='ko'?'🔴':'⚠️'}</span>
+         <span>${esc((DBL_FACTURE[dblCat]||DBL_LIGNE[dblCat]).d)}</span>
+       </div>
+     </div>
+     <div style="padding:0 24px 24px" id="dbl-corps">
+       ${dblEnCours?`<div class="cp-loading">⏳ Chargement de LignesFacture… <span id="dbl-prog"></span></div>`
+        : surLignes ? (lignesToutes?corpsDoublonsLignes(lignesScope):bandeauChargerLignes())
+        : corpsDoublonsFactures(fac)}
+     </div>`;
+}
+
+function bandeauChargerLignes(){
+  return `<div class="empty"><div class="ei">🧬</div><div class="et">Analyse des lignes non lancée</div>
+    <div class="es">Ce contrôle nécessite de charger toute la liste LignesFacture (plusieurs dizaines de milliers d'entrées).<br>
+    Le chargement prend de dix secondes à une minute, puis reste en mémoire pour la session.</div>
+    <div style="margin-top:12px"><button class="btn bpri" onclick="chargerToutesLignes()">⬇️ Charger les lignes et analyser</button></div></div>`;
+}
+
+function ligneIncoherente(l){
+  const q=pa(l.Quantite), pu=pa(l.PUHT), m=r2c(l.MontantHT);
+  if(!q||!pu||!m) return false;
+  return Math.abs(r2c(q*pu)-m) > 0.02;
+}
+
+function corpsDoublonsFactures(fac){
+  const regle=DBL_FACTURE[dblCat];
+  const groupes=grouperPar(fac, regle.k).sort((a,b)=>pa(b[0].TotalTTC)-pa(a[0].TotalTTC));
+  if(!groupes.length) return `<div class="empty"><div class="ei">✅</div><div class="et">Aucun doublon</div><div class="es">Sur ce périmètre et cette règle</div></div>`;
+  const expo=groupes.reduce((s,g)=>s+pa(g[0].TotalTTC)*(g.length-1),0);
+  return `<div style="font-size:12px;color:var(--g500);margin-bottom:8px">
+      ${groupes.length} groupe(s) — exposition théorique si tous étaient de vrais doublons : <strong>${fa(expo)} €</strong>
+    </div>`
+   + groupes.map((g,gi)=>`
+    <div style="margin-bottom:12px;border:1px solid ${regle.g==='ko'?'#fca5a5':'#fcd34d'};border-radius:8px;overflow:hidden">
+      <div style="padding:7px 12px;background:${regle.g==='ko'?'var(--rbg)':'var(--obg)'};font-size:12px;font-weight:600;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span>Groupe ${gi+1} — ${g.length} fiches</span>
+        <span style="font-weight:400;color:var(--g500)">${esc(g[0].Fournisseur||'—')}</span>
+        ${dblCat==='ttc'?`<span style="margin-left:auto;font-weight:400;font-size:11px;color:var(--g500)">Numéros différents : fusion interdite, vérification manuelle</span>`:''}
+      </div>
+      <table class="cptab"><thead><tr>
+        <th>N° facture</th><th>Type</th><th>Date facture</th><th>Date traitement</th>
+        <th style="text-align:right">HT</th><th style="text-align:right">TTC</th><th>Agence</th><th>Statut</th><th></th>
+      </tr></thead><tbody>
+      ${g.map(r=>`<tr>
+        <td class="mono" style="font-weight:600">${esc(r.NumeroFacture||'—')}</td>
+        <td style="font-size:11.5px">${esc(r.Typededocument||'—')}</td>
+        <td style="font-size:11.5px;white-space:nowrap">${fd(r.DateFacture)}</td>
+        <td style="font-size:11.5px;white-space:nowrap;color:var(--g400)">${fd(r.DateTraitement)}</td>
+        <td class="mono" style="text-align:right">${fa(pa(r.TotalHT))} €</td>
+        <td class="mono" style="text-align:right;font-weight:600">${fa(pa(r.TotalTTC))} €</td>
+        <td style="font-size:11.5px">${esc(r.EtablissementAffecte||'—')}</td>
+        <td style="font-size:11.5px">${esc(r.Statut||'—')}</td>
+        <td><button class="btn bgho bsm" onclick="openPanel('${esc(r.CleUnique||'')}')">Ouvrir</button></td>
+      </tr>`).join('')}
+      </tbody></table>
+    </div>`).join('');
+}
+
+function corpsDoublonsLignes(lignesScope){
+  const regle=DBL_LIGNE[dblCat];
+
+  if(regle.special==='calcul'){
+    const ko=lignesScope.filter(ligneIncoherente)
+      .sort((a,b)=>Math.abs(r2c(pa(b.Quantite)*pa(b.PUHT))-r2c(b.MontantHT))-Math.abs(r2c(pa(a.Quantite)*pa(a.PUHT))-r2c(a.MontantHT)));
+    if(!ko.length) return `<div class="empty"><div class="ei">✅</div><div class="et">Aucune incohérence</div></div>`;
+    return `<div style="font-size:12px;color:var(--g500);margin-bottom:8px">${ko.length} ligne(s) — écart cumulé : <strong>${fa(ko.reduce((s,l)=>s+Math.abs(r2c(pa(l.Quantite)*pa(l.PUHT))-r2c(l.MontantHT)),0))} €</strong></div>
+      <div class="cptab-wrap"><table class="cptab"><thead><tr>
+        <th>Fournisseur</th><th>N° facture</th><th>N° L.</th><th>Désignation</th>
+        <th style="text-align:right">Qté</th><th style="text-align:right">PU</th>
+        <th style="text-align:right">Qté × PU</th><th style="text-align:right">Montant lu</th><th style="text-align:right">Écart</th><th></th>
+      </tr></thead><tbody>${ko.slice(0,300).map(l=>{
+        const calc=r2c(pa(l.Quantite)*pa(l.PUHT)), lu=r2c(l.MontantHT);
+        return `<tr>
+          <td style="font-size:11.5px">${esc(l.__fnom)}</td>
+          <td class="mono" style="font-size:11px">${esc(l.__num)}</td>
+          <td class="mono" style="font-size:11px">${esc(l.NumeroLigne||'')}</td>
+          <td style="font-size:11.5px;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.Designation||'')}</td>
+          <td class="mono" style="text-align:right">${l.Quantite??'—'}</td>
+          <td class="mono" style="text-align:right">${l.PUHT??'—'}</td>
+          <td class="mono" style="text-align:right;color:var(--g500)">${fa(calc)}</td>
+          <td class="mono" style="text-align:right;font-weight:600">${fa(lu)}</td>
+          <td class="mono" style="text-align:right;color:var(--red);font-weight:600">${fa(calc-lu)}</td>
+          <td><button class="btn bgho bsm" onclick="openPanel('${esc(l.CleUnique)}')">Ouvrir</button></td>
+        </tr>`;}).join('')}</tbody></table></div>
+      ${ko.length>300?`<div style="font-size:11.5px;color:var(--g400);margin-top:8px">300 premières lignes affichées sur ${ko.length}.</div>`:''}`;
+  }
+
+  let groupes=grouperPar(lignesScope, regle.k);
+  if(regle.inter) groupes=groupes.filter(g=>new Set(g.map(x=>x.CleUnique)).size>1);
+  groupes.sort((a,b)=>pa(b[0].MontantHT)-pa(a[0].MontantHT));
+  if(!groupes.length) return `<div class="empty"><div class="ei">✅</div><div class="et">Aucun doublon de ligne</div><div class="es">Sur ce périmètre et cette règle</div></div>`;
+
+  const expo=groupes.reduce((s,g)=>s+pa(g[0].MontantHT)*(g.length-1),0);
+  return `<div style="font-size:12px;color:var(--g500);margin-bottom:8px">
+      ${groupes.length} groupe(s) — exposition théorique : <strong>${fa(expo)} €</strong> HT
+    </div>`
+   + groupes.slice(0,120).map((g,gi)=>`
+    <div style="margin-bottom:12px;border:1px solid ${regle.g==='ko'?'#fca5a5':'#fcd34d'};border-radius:8px;overflow:hidden">
+      <div style="padding:7px 12px;background:${regle.g==='ko'?'var(--rbg)':'var(--obg)'};font-size:12px;font-weight:600;display:flex;gap:10px;flex-wrap:wrap">
+        <span>Groupe ${gi+1} — ${g.length} lignes sur ${new Set(g.map(x=>x.CleUnique)).size} facture(s)</span>
+        <span style="font-weight:400;color:var(--g500)">${esc(g[0].__fnom)}</span>
+        ${g[0].NumBon?`<span style="font-weight:400;color:var(--g500)">bon ${esc(g[0].NumBon)}</span>`:''}
+      </div>
+      <table class="cptab"><thead><tr>
+        <th>N° facture</th><th>Date fact.</th><th>N° L.</th><th>Bon</th><th>Chantier</th>
+        <th>Date rot.</th><th>Matière</th><th style="text-align:right">Qté</th><th style="text-align:right">Montant HT</th><th></th>
+      </tr></thead><tbody>
+      ${g.map(l=>`<tr>
+        <td class="mono" style="font-size:11px;font-weight:600">${esc(l.__num)}</td>
+        <td style="font-size:11px;white-space:nowrap">${fd(l.__date)}</td>
+        <td class="mono" style="font-size:11px">${esc(l.NumeroLigne||'')}</td>
+        <td class="mono" style="font-size:11px">${esc(l.NumBon||'—')}</td>
+        <td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.Chantier||'—')}</td>
+        <td style="font-size:11px;white-space:nowrap">${fd(l.DateRotation)}</td>
+        <td style="font-size:11px">${esc(l.Mati_x00e8_re||'—')}</td>
+        <td class="mono" style="text-align:right">${l.Quantite??'—'}</td>
+        <td class="mono" style="text-align:right;font-weight:600">${fa(pa(l.MontantHT))} €</td>
+        <td><button class="btn bgho bsm" onclick="openPanel('${esc(l.CleUnique)}')">Ouvrir</button></td>
+      </tr>`).join('')}
+      </tbody></table>
+    </div>`).join('')
+   + (groupes.length>120?`<div style="font-size:11.5px;color:var(--g400)">120 premiers groupes affichés sur ${groupes.length}.</div>`:'');
 }
 
 // ── Motif courant de correction et libellés lisibles des champs ──
