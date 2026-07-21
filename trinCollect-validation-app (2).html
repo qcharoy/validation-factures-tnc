@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v37)</title>
+<title>Tri'n'Collect — Validation Factures (v40)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -355,6 +355,7 @@ td.mono{font-family:var(--mono);font-size:12px}
   <div class="sbs">
     <div class="sbl">Sources & outils</div>
     <div class="ni" onclick="setView('sg')" data-view="sg"><span class="nic">🔗</span>Données Sage<span class="nb gr" id="b-sg">—</span></div>
+    <div class="ni" onclick="setView('co')" data-view="co"><span class="nic">📋</span>Consignes fournisseur<span class="nb gr" id="b-co">—</span></div>
     <div class="ni" onclick="setView('rt')" data-view="rt"><span class="nic">🔄</span>Retraitement IA<span class="nb gr" id="b-rt">—</span></div>
     <div class="ni" onclick="setView('st')" data-view="st"><span class="nic">📊</span>Statistiques</div>
   </div>
@@ -518,6 +519,7 @@ const cfg={
   get wh()   {return lgs('tnc_wh')  ||'https://tri-n-collect.app.n8n.cloud/webhook/Validation'},
   get jid()  {return lgs('tnc_jid') ||''},   // v20 — liste JournalCorrections
   get pjid() {return lgs('tnc_pjid')||'dcbbe4c7-8089-448f-9e2d-fc858289d25d'}, // v20 — PJAExaminer
+  get cid_cons(){return lgs('tnc_cons')||'15697088-2113-457c-a237-66e87cbbc0cd'}, // v39 — ConsignesFournisseur
   get ddid() {return lgs('tnc_ddid')||''},   // v27 — liste DecisionsDoublons
   get whr()  {return lgs('tnc_whr') ||''},   // v28 — webhook n8n de retraitement
   get sgurl(){return lgs('tnc_sgurl')||''},  // v29 — fichier Sage déposé sur SharePoint
@@ -660,10 +662,11 @@ function setView(v){
   document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.view===v));
   const vl=document.getElementById('vlist'), vs=document.getElementById('vstat'), vm=document.getElementById('vmod');
   // v20 : trois familles de vues — liste de factures, module de contrôle, statistiques
-  if(['pj','ec','db','sg','rt','im','tb','pl','fi'].includes(v)){
+  if(['pj','ec','db','sg','rt','im','tb','pl','fi','co'].includes(v)){
     vl.style.display='none'; vs.style.display='none'; vm.style.display='flex';
     if(v==='tb') loadDashboard();
     else if(v==='fi') loadFiabilite();
+    else if(v==='co') loadConsignes();
     else if(v==='pl') loadPipeline();
     else if(v==='pj') loadPJ(); else if(v==='ec') loadEcarts();
     else if(v==='sg') loadSage(); else if(v==='rt') loadRetraitement();
@@ -705,6 +708,8 @@ function badges(){
       ['e1','e2','e3','e4','e5'].forEach(k=>{ const e=document.getElementById('b-'+k); if(e) e.textContent=R[k].length; });
       const efi=document.getElementById('b-fi');
       if(efi && fiCache) efi.textContent=Math.round(fiCache.tx.montant*100)+' %';
+      const eco=document.getElementById('b-co');
+      if(eco && consData) eco.textContent=consData.filter(c=>c.actif).length;
     }
     const fac0=rows.filter(dansPeriode);
     document.getElementById('b-db').textContent =
@@ -2779,6 +2784,18 @@ function analyserSage(brut, nomFichier){
 // que les lignes de charges, ni TVA ni ligne fournisseur. C'est aussi
 // la référence comptable retenue le 19/07.
 const SEUIL_ECART = 0.02;
+// v40 — Cascade en deux passes (méthode validée avec la compta) :
+//   P1 : numéro normalisé + TTC identiques (401 côté Sage, TotalTTC côté
+//        SharePoint). Certitude : montant juste, doublons de numéro levés.
+//   P2 : numéro seul, TTC différent. Rapproché, mais l'écart est SIGNALÉ.
+// Mettre le TTC DANS la clé unique interdirait de voir les écarts : une
+// facture mal lue deviendrait « absente » au lieu d'« en écart ». D'où
+// la P2, sans laquelle on perdrait exactement ce qu'on veut mesurer.
+const TTC_TOL = 0.02;
+function ttcSage(g){
+  // Le 401 (ttc) est la référence ; à défaut, repli sur la somme des charges.
+  return g.ttc!=null ? Math.abs(g.ttc) : Math.abs(Number(g.ht)||0);
+}
 function rapprocher(){
   const fac = rows.filter(dansPeriode);
   const parNorm={};
@@ -2788,9 +2805,20 @@ function rapprocher(){
   sageData.forEach(g=>{
     const cand = parNorm[g.refNorm] || [];
     if(cand.length===0){ manquantes.push({sage:g}); return; }
-    if(cand.length>1){ ambigues.push({sage:g, candidats:cand}); return; }
-    const f=cand[0], ht=Math.abs(pa(f.TotalHT)), d=Math.round((Math.abs(Number(g.ht)||0)-ht)*100)/100;
-    (Math.abs(d)<=SEUIL_ECART ? ok : ecarts).push({sage:g, facture:f, ecart:d});
+    const mSage = ttcSage(g);
+
+    // P1 : parmi les candidats du même numéro, celui dont le TTC colle.
+    const p1 = cand.filter(f=>Math.abs(Math.abs(pa(f.TotalTTC))-mSage)<=TTC_TOL);
+    if(p1.length===1){ ok.push({sage:g, facture:p1[0], ecart:0, passe:'P1'}); return; }
+    if(p1.length>1){ ambigues.push({sage:g, candidats:p1, raison:'même numéro ET même TTC'}); return; }
+
+    // P2 : un seul candidat au numéro, mais TTC différent → écart signalé.
+    if(cand.length===1){
+      const f=cand[0], d=Math.round((mSage-Math.abs(pa(f.TotalTTC)))*100)/100;
+      ecarts.push({sage:g, facture:f, ecart:d, passe:'P2'}); return;
+    }
+    // Plusieurs candidats, aucun au bon TTC : on ne devine pas.
+    ambigues.push({sage:g, candidats:cand, raison:'plusieurs factures, aucune au bon TTC'});
   });
   const rapprochees=new Set([...ok,...ecarts].map(x=>x.facture.CleUnique));
   const sansSage = fac.filter(f=>!rapprochees.has(f.CleUnique));
@@ -2878,31 +2906,34 @@ function corpsSage(R){
   }
 
   if(sgOnglet==='ecarts'){
-    const l=R.ecarts.sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart)).map(({sage:g,facture:f,ecart})=>`<tr>
+    const l=R.ecarts.sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart)).map(({sage:g,facture:f,ecart})=>{
+      const tS=ttcSage(g), tI=Math.abs(pa(f.TotalTTC));
+      return `<tr>
       <td class="mono" style="font-weight:600">${esc(g.ref)}</td>
       <td>${esc(f.Fournisseur||g.tiers||'—')}</td>
-      <td class="mono" style="text-align:right">${fa(pa(f.TotalHT))} €</td>
-      <td class="mono" style="text-align:right">${fa(g.ht)} €</td>
+      <td class="mono" style="text-align:right">${fa(tI)} €</td>
+      <td class="mono" style="text-align:right">${fa(tS)} €</td>
       <td class="mono" style="text-align:right;font-weight:600;color:var(--red)">${fa(ecart)} €</td>
-      <td class="mono" style="text-align:right;color:var(--g500)">${pa(f.TotalHT)?((g.ht/pa(f.TotalHT)).toFixed(3)):'—'}</td>
+      <td class="mono" style="text-align:right;color:var(--g500)">${tI?(tS/tI).toFixed(3):'—'}</td>
       <td><button class="btn bgho bsm" onclick="openPanel('${esc(f.CleUnique)}')">Ouvrir</button></td>
-    </tr>`);
-    return `<div class="cp-bandeau wa"><span>⚠️</span><span>Le HT lu par l'IA diffère du HT comptabilisé de plus de ${SEUIL_ECART.toFixed(2)} €.
-      Un <strong>ratio proche de 0,83</strong> signale une TVA non déductible sur véhicule, <strong>0,90</strong> une taxe de séjour :
-      ce sont des écarts attendus, pas des erreurs de lecture.</span></div>`
-      + T(['Réf. pièce','Fournisseur','HT n8n','HT Sage','Écart','Ratio',''], l, 'Aucun écart');
+    </tr>`;});
+    return `<div class="cp-bandeau wa"><span>⚠️</span><span>Le TTC lu par l'IA diffère du TTC comptabilisé (compte 401) de plus de ${TTC_TOL.toFixed(2)} €.
+      Contrairement au HT, le TTC ne subit pas la doctrine de TVA non déductible : un écart ici est un <strong>vrai écart de lecture</strong>,
+      pas un ratio 0,83 attendu.</span></div>`
+      + T(['Réf. pièce','Fournisseur','TTC n8n','TTC Sage','Écart','Ratio',''], l, 'Aucun écart');
   }
 
   if(sgOnglet==='ambigues'){
-    const l=R.ambigues.map(({sage:g,candidats})=>`<tr>
+    const l=R.ambigues.map(({sage:g,candidats,raison})=>`<tr>
       <td class="mono" style="font-weight:600">${esc(g.ref)}</td>
       <td>${esc(g.tiers||'—')}</td>
-      <td class="mono" style="text-align:right">${fa(g.ht)} €</td>
-      <td>${candidats.map(f=>`<button class="btn bgho bsm" style="margin:2px" onclick="openPanel('${esc(f.CleUnique)}')">${esc(f.NumeroFacture)} — ${fa(pa(f.TotalHT))} €</button>`).join('')}</td>
+      <td class="mono" style="text-align:right">${fa(ttcSage(g))} €</td>
+      <td style="font-size:11px;color:var(--g500)">${esc(raison||'')}</td>
+      <td>${candidats.map(f=>`<button class="btn bgho bsm" style="margin:2px" onclick="openPanel('${esc(f.CleUnique)}')">${esc(f.NumeroFacture)} — ${fa(pa(f.TotalTTC))} €</button>`).join('')}</td>
     </tr>`);
-    return `<div class="cp-bandeau wa"><span>❓</span><span>Plusieurs factures portent le même numéro normalisé : le rapprochement automatique est refusé.
-      Traitez d'abord ces doublons dans la vue dédiée.</span></div>`
-      + T(['Réf. pièce','Tiers','HT Sage','Candidats en base'], l, 'Aucune ambiguïté');
+    return `<div class="cp-bandeau wa"><span>❓</span><span>Le rapprochement automatique est refusé : soit deux factures ont le même numéro ET le même TTC,
+      soit plusieurs portent le numéro sans qu'aucune n'ait le bon TTC. À lever dans la vue <strong>Doublons</strong>.</span></div>`
+      + T(['Réf. pièce','Tiers','TTC Sage','Raison','Candidats en base'], l, 'Aucune ambiguïté');
   }
 
   if(sgOnglet==='sanssage'){
@@ -3348,6 +3379,8 @@ function normaliserSage(texte, nom){
       // avant que le suivi ne soit ajouté au workflow : on distingue donc
       // « pas de 488 » (null) de « 488 soldé » (0).
       a:        (o.a ?? o.a488 ?? null) === null ? null : Math.round(Number(o.a ?? o.a488)*100)/100,
+      // v40 — TTC issu du compte 401 : clé de rapprochement primaire.
+      ttc:      (o.ttc ?? null) === null ? null : Math.round(Number(o.ttc)*100)/100,
       nb:       Number(o.nb ?? o.n ?? 0),
       aux:      o.aux ?? o.CT_Num ?? '',
       sections: new Set(o.sections || o.s || []),
@@ -3526,26 +3559,48 @@ function ecrituresPour(cand){
   const dateC = (f.DateFacture||'').slice(0,10) || (f.DateTraitement||'').slice(0,10);
   const num   = String(f.NumeroFacture||'').slice(0,30);
   const four  = String(f.Fournisseur||'').slice(0,40);
+  const r2=v=>Math.round(v*100)/100;
   const L = (cpt,lib,deb,cre,typ,sec)=>out.push({
     journal: impCfg.journal, date: dateC, numFacture: num, compte: cpt, tiers: '',
     libelle: lib.slice(0,60), structure: typ==='A'?impCfg.structure:'', section: sec||'',
-    debit: Math.round(deb*100)/100, credit: Math.round(cre*100)/100, type: typ
+    debit: r2(deb), credit: r2(cre), type: typ
   });
 
-  const libelleDe = l => `${four} - ${String(l.Designation||'').trim()}`.replace(/\s+/g,' ').trim();
-
-  // 1. Contrepartie 488 au crédit — TOUJOURS en premier (compte de bilan)
-  if(impCfg.contrepartie==='facture'){
-    L(impCfg.compte488, `${four} - ${num}`, 0, cand.somme, 'G', '');
-  }
-  // 2. puis, par ligne de charge : générale (G) puis analytique (A)
+  // v38 — REGROUPEMENT. Une facture de 40 rotations sur le même compte
+  // et la même agence ne doit produire qu'UNE ligne générale et UNE
+  // ligne analytique, pas 80. On agrège donc les lignes de charge :
+  //   · la ligne G, par compte comptable
+  //   · la ligne A, par compte comptable + section analytique
+  // Le total des lignes A d'un compte égale forcément sa ligne G.
+  const parCompte={};              // compte -> montant total
+  const parCompteSection={};       // compte|section -> montant
   cand.lignes.forEach(l=>{
-    const m=Math.round(pa(l.MontantHT)*100)/100;
+    const m=r2(pa(l.MontantHT));
     if(!m) return;
-    const lib=libelleDe(l);
-    if(impCfg.contrepartie==='ligne') L(impCfg.compte488, lib, 0, m, 'G', '');
-    L(String(l.CompteComptable||'').trim(), lib, m, 0, 'G', '');
-    L(String(l.CompteComptable||'').trim(), lib, m, 0, 'A', sectionDe(l.EtablissementAffecte));
+    const cpt=String(l.CompteComptable||'').trim();
+    const sec=sectionDe(l.EtablissementAffecte);
+    parCompte[cpt]=r2((parCompte[cpt]||0)+m);
+    const k=cpt+'|'+sec;
+    parCompteSection[k]=r2((parCompteSection[k]||0)+m);
+  });
+
+  // Un libellé unique par facture : la désignation ligne à ligne n'a
+  // plus de sens une fois regroupé.
+  const lib=`${four} - ${num}`;
+
+  // 1. Contrepartie 488 au crédit — toujours en tête (compte de bilan)
+  if(impCfg.contrepartie==='facture'){
+    L(impCfg.compte488, lib, 0, cand.somme, 'G', '');
+  }
+  // 2. par compte comptable : la ligne G, puis ses lignes A par section.
+  //    L'ordre G puis A dans chaque compte est impératif pour l'import.
+  Object.keys(parCompte).sort().forEach(cpt=>{
+    if(impCfg.contrepartie==='ligne') L(impCfg.compte488, lib, 0, parCompte[cpt], 'G', '');
+    L(cpt, lib, parCompte[cpt], 0, 'G', '');
+    Object.keys(parCompteSection).filter(k=>k.startsWith(cpt+'|')).sort().forEach(k=>{
+      const sec=k.slice(cpt.length+1);
+      L(cpt, lib, parCompteSection[k], 0, 'A', sec);
+    });
   });
   return out;
 }
@@ -3897,14 +3952,32 @@ function ecrituresCorrection(cand){
     compte:cpt,tiers:'',libelle:lib.slice(0,60),structure:typ==='A'?impCfg.structure:'',
     section:sec||'',debit:Math.round(deb*100)/100,credit:Math.round(cre*100)/100,type:typ});
 
+  // v38 — regroupement : on cumule les mouvements par compte+section
+  // avant / après, pour ne pas multiplier les lignes de correction quand
+  // plusieurs lignes d'une même facture changent d'agence ensemble.
+  const r2=v=>Math.round(v*100)/100;
+  const bruts={};  // compte|section -> delta (négatif = sortie, positif = entrée)
+  const lib=`${four} - REAFF ${num}`;
   (cand.derive||[]).forEach(d=>{
-    const lib=`${four} - REAFF ${String(d.ligne.Designation||'').trim()}`;
-    // Annulation sur l'ancienne section
-    L(d.avant.cpt, lib, 0, d.avant.m, 'G', '');
-    L(d.avant.cpt, lib, 0, d.avant.m, 'A', d.avant.sec);
-    // Réimputation sur la nouvelle
-    L(d.apres.cpt, lib, d.apres.m, 0, 'G', '');
-    L(d.apres.cpt, lib, d.apres.m, 0, 'A', d.apres.sec);
+    const kAv=d.avant.cpt+'|'+d.avant.sec;
+    const kAp=d.apres.cpt+'|'+d.apres.sec;
+    bruts[kAv]=r2((bruts[kAv]||0)-d.avant.m);   // annulation
+    bruts[kAp]=r2((bruts[kAp]||0)+d.apres.m);   // réimputation
+  });
+  // Par compte, la ligne générale G puis les lignes analytiques A.
+  const parCompte={};
+  Object.keys(bruts).forEach(k=>{ const c=k.split('|')[0]; parCompte[c]=r2((parCompte[c]||0)+bruts[k]); });
+  Object.keys(parCompte).sort().forEach(cpt=>{
+    const g=parCompte[cpt];
+    if(Math.abs(g)>0.005){
+      // La générale ne bouge que si le compte lui-même change de solde,
+      // ce qui n'arrive pas dans une simple réaffectation (delta = 0).
+      if(g>0) L(cpt, lib, g, 0, 'G', ''); else L(cpt, lib, 0, -g, 'G', '');
+    }
+    Object.keys(bruts).filter(k=>k.startsWith(cpt+'|') && Math.abs(bruts[k])>0.005).sort().forEach(k=>{
+      const sec=k.slice(cpt.length+1), m=bruts[k];
+      if(m>0) L(cpt, lib, m, 0, 'A', sec); else L(cpt, lib, 0, -m, 'A', sec);
+    });
   });
   return out;
 }
@@ -4425,6 +4498,190 @@ function rFiabilite(){
         <button class="btn bgho bsm" style="margin-left:auto" onclick="fiab(true);rFiabilite()">↻ Recalculer</button>
       </div>
       <div style="padding:0 24px 24px">${corps}</div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v39 — CONSIGNES FOURNISSEUR
+// ═══════════════════════════════════════════════════════════════
+// La liste SharePoint ConsignesFournisseur pilote la lecture IA : pour
+// un fournisseur donné, une consigne en texte libre guide Claude (ex.
+// « le montant est sur le BL, pas dans le tableau »). Le worker la lit
+// à chaque traitement. La modifier ici, puis relancer le retraitement,
+// c'est la boucle d'amélioration de la fiabilité.
+//
+// ⚠️ Liste créée par import Excel : noms internes field_1/2/3, jamais
+// les libellés affichés. Title=MotifDetection, field_1=SIREN,
+// field_2=Consigne, field_3=Actif.
+
+let consData=null, consFiltre='', consRech='';
+
+async function loadConsignes(){ if(!consData) await chargerConsignes(); rConsignes(); }
+
+async function chargerConsignes(){
+  const el=document.getElementById('vmod');
+  if(el) el.innerHTML=modHeader('📋 Consignes fournisseur','Chargement…')+`<div class="cp-loading" style="margin:24px">⏳</div>`;
+  try{
+    const d=await gGet(`/sites/${cfg.sid}/lists/${cfg.cid_cons}/items?$top=500&$expand=fields`);
+    consData=(d.value||[]).map(it=>{
+      const r=it.fields||{};
+      return {
+        _spId: it.id,
+        motif:   r.MotifDetection ?? r.Title ?? '',
+        siren:   r.SIREN          ?? r.field_1 ?? '',
+        consigne:r.Consigne       ?? r.field_2 ?? '',
+        actif:  !(r.Actif===false||r.Actif==='false'||r.Actif==='Non'||r.Actif==='NON'||r.Actif===0||r.Actif==='0'
+                 || r.field_3===false||r.field_3==='Non'),
+        _new: null
+      };
+    });
+    console.log(`[consignes] ${consData.length} fiche(s)`);
+  }catch(e){ toast('⚠️ '+e.message,'err'); consData=[]; }
+}
+
+// Rattacher, à titre indicatif, le nombre de factures et le taux de
+// fiabilité du fournisseur ciblé : on voit si une consigne « paie ».
+function statFournisseurConsigne(c){
+  if(!fiCache) return null;
+  const F=fiCache.fournisseurs.find(x=>{
+    // rapprochement par SIREN si présent, sinon par nom contenu
+    if(c.siren && x.f){ /* le SIREN n'est pas dans fiCache : repli sur le nom */ }
+    return c.motif && String(x.f||'').toLowerCase().includes(String(c.motif).toLowerCase().split(' ')[0]||'§§§');
+  });
+  return F ? {n:F.n, mt:Math.round(F.mt/F.n*100)} : null;
+}
+
+function rConsignes(){
+  const el=document.getElementById('vmod');
+  const q=consRech.trim().toLowerCase();
+  let liste=(consData||[]).filter(c=>{
+    if(consFiltre==='actives'   && !c.actif) return false;
+    if(consFiltre==='inactives' &&  c.actif) return false;
+    if(consFiltre==='sanssiren' &&  String(c.siren||'').trim()) return false;
+    if(q && !(`${c.motif} ${c.siren} ${c.consigne}`.toLowerCase().includes(q))) return false;
+    return true;
+  }).sort((a,b)=>String(a.motif).localeCompare(String(b.motif),'fr'));
+
+  const nA=(consData||[]).filter(c=>c.actif).length;
+  const modifs=(consData||[]).filter(c=>c._new).length;
+
+  el.innerHTML = modHeader('📋 Consignes fournisseur',
+      `${(consData||[]).length} consigne(s) · ${nA} active(s) · pilotent la lecture de l'IA`)
+  + `<div class="tlb">
+      <div class="sbx" style="max-width:320px"><input type="text" placeholder="Fournisseur, SIREN, texte…" value="${esc(consRech)}"
+           oninput="consRech=this.value;clearTimeout(window._cT);window._cT=setTimeout(rConsignes,200)"></div>
+      <button class="btn ${consFiltre===''?'bpri':'bgho'} bsm" onclick="consFiltre='';rConsignes()">Toutes</button>
+      <button class="btn ${consFiltre==='actives'?'bpri':'bgho'} bsm" onclick="consFiltre='actives';rConsignes()">Actives (${nA})</button>
+      <button class="btn ${consFiltre==='inactives'?'bpri':'bgho'} bsm" onclick="consFiltre='inactives';rConsignes()">Inactives</button>
+      <button class="btn ${consFiltre==='sanssiren'?'bpri':'bgho'} bsm" onclick="consFiltre='sanssiren';rConsignes()">Sans SIREN</button>
+      <span style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn bgho bsm" onclick="chargerConsignes().then(rConsignes)">↻ Recharger</button>
+        <button class="btn bpri bsm" onclick="nouvelleConsigne()">➕ Nouvelle consigne</button>
+      </span>
+     </div>
+     <div style="padding:0 24px 10px"><div class="cp-bandeau wa"><span>💡</span><span>
+       La consigne guide l'IA en texte libre. Après l'avoir modifiée, allez dans <strong>Retraitement IA</strong>
+       pour relire les factures du fournisseur et vérifier l'effet dans <strong>Fiabilité de l'IA</strong>.
+       Le <strong>motif de détection</strong> (colonne <em>Title</em>) est le mot-clé qui associe la consigne au fournisseur.</span></div></div>
+     ${modifs?`<div style="padding:0 24px 10px"><div class="cp-bandeau ko"><span>✏️</span><span>${modifs} modification(s) non enregistrée(s).
+        <button class="btn bpri bsm" style="margin-left:8px" onclick="enregistrerConsignes()">💾 Tout enregistrer</button></span></div></div>`:''}
+     <div style="padding:0 24px 24px">
+       ${!liste.length?`<div class="empty"><div class="ei">📭</div><div class="et">Aucune consigne</div></div>`:`
+       ${liste.map(c=>ficheConsigne(c)).join('')}`}
+     </div>`;
+}
+
+function cval(c,champ){ return (c._new && c._new[champ]!==undefined) ? c._new[champ] : c[champ]; }
+function setCons(id,champ,val){
+  const c=consData.find(x=>x._spId===id); if(!c) return;
+  if(!c._new) c._new={};
+  const v = champ==='actif' ? !!val : val;
+  if(String(v)===String(c[champ]??'')) delete c._new[champ];
+  else c._new[champ]=v;
+  if(c._new && !Object.keys(c._new).length) c._new=null;
+  rConsignes();
+}
+
+function ficheConsigne(c){
+  const dirty=!!c._new;
+  const st=statFournisseurConsigne(c);
+  return `<div style="margin-bottom:12px;border:1px solid ${dirty?'#fcd34d':'var(--g200)'};border-radius:10px;overflow:hidden;background:white">
+    <div style="padding:10px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--g100)">
+      <input class="cp-input${dirty?' dirty':''}" style="font-weight:600;min-width:200px" value="${esc(cval(c,'motif'))}"
+             placeholder="Motif de détection (nom / mot-clé fournisseur)" onchange="setCons('${c._spId}','motif',this.value)">
+      <span class="flab">SIREN</span>
+      <input class="cp-input" style="width:120px" value="${esc(cval(c,'siren'))}"
+             placeholder="9 chiffres" onchange="setCons('${c._spId}','siren',this.value)">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" ${cval(c,'actif')?'checked':''} onchange="setCons('${c._spId}','actif',this.checked)" style="width:15px;height:15px"> Active</label>
+      ${st?`<span class="badge ${st.mt>=95?'bg2':st.mt>=70?'bo2':'br2'}" title="Fiabilité montant sur ce fournisseur">${st.n} fact · ${st.mt}%</span>`:''}
+      <span style="margin-left:auto;display:flex;gap:6px">
+        ${dirty?`<button class="btn bgho bsm" onclick="delete consData.find(x=>x._spId==='${c._spId}')._new;rConsignes()">↺</button>`:''}
+        <button class="btn bgho bsm" onclick="retraiterDepuisConsigne('${c._spId}')" title="Relire les factures de ce fournisseur">🔄 Retraiter</button>
+        <button class="btn bdan bsm" onclick="supprimerConsigne('${c._spId}')">🗑️</button>
+      </span>
+    </div>
+    <div style="padding:10px 14px">
+      <textarea class="cp-input${dirty?' dirty':''}" style="width:100%;min-height:60px;resize:vertical;font-family:var(--font)"
+        placeholder="Consigne pour l'IA — ex. « Le montant à retenir est celui du bon de livraison, pas le total du tableau »"
+        onchange="setCons('${c._spId}','consigne',this.value)">${esc(cval(c,'consigne'))}</textarea>
+    </div>
+  </div>`;
+}
+
+function nouvelleConsigne(){
+  const tmp={_spId:'NEW-'+Date.now(), motif:'', siren:'', consigne:'', actif:true, _new:{motif:'',consigne:''}, _creation:true};
+  consData.unshift(tmp); consRech=''; consFiltre=''; rConsignes();
+}
+
+async function enregistrerConsignes(){
+  const aFaire=(consData||[]).filter(c=>c._new);
+  if(!aFaire.length){ toast('Rien à enregistrer'); return; }
+  let ok=0, ko=0;
+  for(const c of aFaire){
+    // Écriture sous les noms internes SharePoint, jamais les libellés.
+    const fields={
+      Title:   cval(c,'motif'),
+      field_1: cval(c,'siren'),
+      field_2: cval(c,'consigne'),
+      field_3: cval(c,'actif')?'Oui':'Non'
+    };
+    try{
+      if(c._creation){
+        const r=await gWrite('POST', `/sites/${cfg.sid}/lists/${cfg.cid_cons}/items`, {fields});
+        c._spId=r.id; delete c._creation;
+      } else {
+        await gWrite('PATCH', `/sites/${cfg.sid}/lists/${cfg.cid_cons}/items/${c._spId}/fields`, fields);
+      }
+      c.motif=fields.Title; c.siren=fields.field_1; c.consigne=fields.field_2; c.actif=fields.field_3==='Oui'; c._new=null;
+      ok++;
+      journaliser('CONSIGNE|'+c._spId, c.motif, [{cible:'Consigne',champ:'Modification',avant:'',apres:fields.field_2.slice(0,80),cleLigne:''}], 'Édition consigne fournisseur');
+    }catch(e){ ko++; console.error(e); }
+  }
+  rConsignes();
+  toast(ko? `⚠️ ${ok} enregistrée(s), ${ko} en échec` : `✅ ${ok} consigne(s) enregistrée(s)`, ko?'err':'ok');
+}
+
+async function supprimerConsigne(id){
+  const c=consData.find(x=>x._spId===id); if(!c) return;
+  if(c._creation){ consData=consData.filter(x=>x._spId!==id); rConsignes(); return; }
+  if(!confirm(`Supprimer la consigne « ${c.motif} » ?`)) return;
+  try{
+    await gWrite('DELETE', `/sites/${cfg.sid}/lists/${cfg.cid_cons}/items/${id}`, undefined);
+    consData=consData.filter(x=>x._spId!==id);
+    journaliser('CONSIGNE|'+id, c.motif, [{cible:'Consigne',champ:'Suppression',avant:c.consigne.slice(0,80),apres:'(supprimée)',cleLigne:''}], 'Suppression consigne');
+    toast('🗑️ Consigne supprimée','ok'); rConsignes();
+  }catch(e){ toast('⚠️ '+e.message,'err'); }
+}
+
+// Depuis une consigne, sauter au retraitement du fournisseur ciblé.
+function retraiterDepuisConsigne(id){
+  const c=consData.find(x=>x._spId===id); if(!c) return;
+  if(c._new){ toast('Enregistrez d\'abord la consigne'); return; }
+  const mot=(c.motif||'').trim();
+  const cand=[...new Set(rows.map(r=>r.Fournisseur))].find(f=>f && mot && f.toLowerCase().includes(mot.toLowerCase().split(' ')[0]));
+  if(cand){ retraiterDepuisEcarts(cand); }
+  else { rtMode='fournisseur'; setView('rt'); toast('Choisissez le fournisseur : le motif « '+mot+' » ne correspond à aucun nom exact'); }
 }
 
 // ── Motif courant de correction et libellés lisibles des champs ──
