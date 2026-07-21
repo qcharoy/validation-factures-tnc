@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v41)</title>
+<title>Tri'n'Collect — Validation Factures (v42)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -2221,8 +2221,12 @@ function loadEcarts(){
           <td style="font-size:12px;${r.EtablissementAffecte?'':'color:var(--red);font-weight:600'}">${esc(r.EtablissementAffecte||'NON AFFECTÉE')}</td>
           <td class="mono" style="text-align:right;font-weight:600">${ECARTS[k].v(r)}</td>
           <td style="font-size:11.5px">${esc(r.Statut||'—')}</td>
-          <td onclick="event.stopPropagation()"><button class="btn bgho bsm" title="Corriger la consigne puis relire toutes les factures de ce fournisseur"
-              onclick='retraiterDepuisEcarts(${JSON.stringify(r.Fournisseur||"(sans nom)")})'>🔄</button></td>
+          <td onclick="event.stopPropagation()" style="white-space:nowrap">
+            <button class="btn bpri bsm" title="Analyser cet écart avec l'IA et proposer une consigne"
+              onclick='analyserEcartIA(${JSON.stringify(r.CleUnique)}, {sage:__sgFacture(${JSON.stringify(r.NumeroFacture||"")}), ecart:null})'>🔎</button>
+            <button class="btn bgho bsm" title="Corriger la consigne puis relire toutes les factures de ce fournisseur"
+              onclick='retraiterDepuisEcarts(${JSON.stringify(r.Fournisseur||"(sans nom)")})'>🔄</button>
+          </td>
         </tr>`).join('')}</tbody></table></div>`}
      </div>`;
 }
@@ -4231,6 +4235,8 @@ function genererCorrection(i){
 function suivi488(){ return (sageData||[]).some(g=>g.a!=null); }
 // Retrouve une pièce Sage par sa référence (pour l'analyse d'écart).
 function __sg(ref){ return (sageData||[]).find(g=>g.ref===ref) || null; }
+// Retrouve la pièce Sage à partir d'un numéro de facture (via la clé normalisée).
+function __sgFacture(num){ const n=numNorm(num); return (sageData||[]).find(g=>g.refNorm===n) || null; }
 
 // ── Sens comptable : détecté, jamais supposé ──────────────────
 // Une charge est au débit, donc positive. Mais la convention EC_Sens
