@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v34)</title>
+<title>Tri'n'Collect — Validation Factures (v36)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -734,51 +734,97 @@ function bornesPreset(k){
     default:       return [null,null];
   }
 }
-function litPeriode(){
-  return {
-    champ:  document.getElementById('fchamp')?.value || 'DateFacture',
-    preset: document.getElementById('fp')?.value ?? '3m',
-    du:     document.getElementById('fdu')?.value || '',
-    au:     document.getElementById('fau')?.value || ''
-  };
+// v36 — La période était lue dans le DOM de la vue « liste », donc
+// invisible et non modifiable depuis les autres écrans. Elle devient un
+// état à part entière, partagé par toutes les vues.
+let per = { champ:'DateFacture', preset:'3m', du:'', au:'' };
+function litPeriode(){ return per; }
+
+function barrePeriode(){
+  const f=x=>x?new Date(x+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'}):'…';
+  const resume=(!per.du&&!per.au) ? 'toutes périodes' : `${f(per.du)} → ${f(per.au)}`;
+  const b=(k,l)=>`<button class="btn ${per.preset===k?'bpri':'bgho'} bsm" onclick="perPreset('${k}')">${l}</button>`;
+  return `<div class="tlb" style="padding-top:0;padding-bottom:8px">
+    <span class="flab">Période</span>
+    <select class="fs" style="max-width:180px" onchange="per.champ=this.value;perChange()">
+      <option value="DateFacture"${per.champ==='DateFacture'?' selected':''}>📅 Date de facture</option>
+      <option value="DateTraitement"${per.champ==='DateTraitement'?' selected':''}>⚙️ Date de traitement</option>
+    </select>
+    ${b('mois','Mois')}${b('mois-1','Mois -1')}${b('3m','3 mois')}${b('6m','6 mois')}${b('annee','Année')}${b('','Tout')}
+    <label class="flab">du</label><input type="date" class="fdate" value="${per.du}" onchange="per.du=this.value;per.preset='perso';perChange()">
+    <label class="flab">au</label><input type="date" class="fdate" value="${per.au}" onchange="per.au=this.value;per.preset='perso';perChange()">
+    <span class="fres" style="margin-left:auto">${esc(resume)}</span>
+  </div>`;
+}
+function perPreset(k){
+  per.preset=k;
+  if(k===''){ per.du=''; per.au=''; }
+  else { const [d1,d2]=bornesPreset(k); per.du=d1?iso(d1):''; per.au=d2?iso(d2):''; }
+  perChange();
+}
+// Un changement de période invalide tous les calculs dérivés.
+function perChange(){
+  memorisePeriode(); syncDomPeriode();
+  pipeCache=null; fiCache=null; impCandidats=null;
+  rafraichirVue();
+}
+function syncDomPeriode(){
+  const g=id=>document.getElementById(id);
+  if(g('fchamp')) g('fchamp').value=per.champ;
+  if(g('fp'))     g('fp').value=per.preset;
+  if(g('fdu'))    g('fdu').value=per.du;
+  if(g('fau'))    g('fau').value=per.au;
+  if(g('fdates')) g('fdates').style.display = per.preset==='perso' ? 'flex' : 'none';
+  try{ majResumePeriode(); }catch(e){}
+}
+function rafraichirVue(){
+  const v=curV;
+  if(v==='tb') rDashboard();
+  else if(v==='pl') rPipeline();
+  else if(v==='fi') rFiabilite();
+  else if(v==='ec') loadEcarts();
+  else if(v==='db') rDoublons();
+  else if(v==='pj') rPJ();
+  else if(v==='sg') rSage();
+  else if(v==='rt') rRetraitement();
+  else if(v==='im') rImport();
+  else if(v==='st') renderStats();
+  else { badges(); renderTable(); }
 }
 function appliquePresetAuxChamps(){
-  const {preset}=litPeriode();
+  const preset = document.getElementById('fp')?.value ?? per.preset;
+  per.preset = preset;
   const zone=document.getElementById('fdates');
   zone.style.display = preset==='perso' ? 'flex' : 'none';
   if(preset && preset!=='perso'){
     const [d1,d2]=bornesPreset(preset);
-    document.getElementById('fdu').value = d1?iso(d1):'';
-    document.getElementById('fau').value = d2?iso(d2):'';
+    per.du = d1?iso(d1):''; per.au = d2?iso(d2):'';
+    document.getElementById('fdu').value = per.du;
+    document.getElementById('fau').value = per.au;
   }
-  if(preset===''){ document.getElementById('fdu').value=''; document.getElementById('fau').value=''; }
+  if(preset===''){ per.du=''; per.au=''; document.getElementById('fdu').value=''; document.getElementById('fau').value=''; }
 }
-function memorisePeriode(){
-  const p=litPeriode();
-  lss('tnc_per', JSON.stringify(p));
-}
+function memorisePeriode(){ lss('tnc_per', JSON.stringify(per)); }
 function restaurePeriode(){
-  let p={champ:'DateFacture',preset:'3m',du:'',au:''};
-  try{ const j=JSON.parse(lgs('tnc_per')||'null'); if(j&&j.preset!==undefined) p=j; }catch(e){}
-  document.getElementById('fchamp').value=p.champ||'DateFacture';
-  document.getElementById('fp').value=p.preset??'3m';
-  appliquePresetAuxChamps();
-  if(p.preset==='perso'){ document.getElementById('fdu').value=p.du||''; document.getElementById('fau').value=p.au||''; }
-  majResumePeriode();
+  try{ const j=JSON.parse(lgs('tnc_per')||'null'); if(j&&j.preset!==undefined) per=Object.assign(per,j); }catch(e){}
+  if(per.preset && per.preset!=='perso'){ const [d1,d2]=bornesPreset(per.preset); per.du=d1?iso(d1):''; per.au=d2?iso(d2):''; }
+  syncDomPeriode();
 }
-function onPresetChange(){ appliquePresetAuxChamps(); memorisePeriode(); majResumePeriode(); renderTable(); }
-function onPeriodeChange(){ memorisePeriode(); majResumePeriode(); renderTable(); }
+function onPresetChange(){ appliquePresetAuxChamps(); perChange(); }
+function onPeriodeChange(){ per.champ=document.getElementById('fchamp').value; perChange(); }
 function onDateManuelle(){
   const du=document.getElementById('fdu').value, au=document.getElementById('fau').value;
   if(du&&au&&du>au){ toast('⚠️ La date de début est postérieure à la date de fin','err'); return; }
+  per.du=du; per.au=au; per.preset='perso';
   document.getElementById('fp').value='perso';
   document.getElementById('fdates').style.display='flex';
-  memorisePeriode(); majResumePeriode(); renderTable();
+  perChange();
 }
 function razPeriode(){
+  per.champ='DateFacture'; per.preset='3m';
   document.getElementById('fchamp').value='DateFacture';
   document.getElementById('fp').value='3m';
-  appliquePresetAuxChamps(); memorisePeriode(); majResumePeriode(); renderTable();
+  appliquePresetAuxChamps(); perChange();
 }
 function majResumePeriode(){
   const {champ,preset,du,au}=litPeriode();
@@ -2144,8 +2190,9 @@ function loadEcarts(){
       ${statCard('orange', parType.lig.length+parType.avo.length+parType.rev.length,'Alertes')}
       ${statCard('gray', total,'Factures touchées')}
       ${statCard('green', fa(rows.filter(r=>cles.some(k=>ECARTS[k].f(r))).reduce((s,r)=>s+pa(r.TotalTTC),0))+' €','TTC concerné')}
-     </div>
-     <div class="tlb">
+     </div>`
+     + barrePeriode()
+     + `<div class="tlb">
        <button class="btn ${ecFiltre===''?'bpri':'bgho'} bsm" onclick="ecFiltre='';loadEcarts()">Tous</button>
        ${cles.map(k=>`<button class="btn ${ecFiltre===k?'bpri':'bgho'} bsm" onclick="ecFiltre='${k}';loadEcarts()">${ECARTS[k].g==='ko'?'🔴':'⚠️'} ${esc(ECARTS[k].t)} (${parType[k].length})</button>`).join('')}
        <button class="btn bgho bsm" style="margin-left:auto" onclick="loadData()">↻ Rafraîchir</button>
@@ -2321,8 +2368,9 @@ function rDoublons(){
       ${statCard('orange',nFac.ttc, 'Même TTC à vérifier')}
       ${statCard('gray',  fac.length, 'Factures analysées')}
       ${statCard('blue',  lignesToutes?lignesScope.length:'—', 'Lignes analysées')}
-     </div>
-     <div class="tlb">
+     </div>`
+     + barrePeriode()
+     + `<div class="tlb">
        <span class="flab">Périmètre</span>
        <select class="fs" onchange="dblScope=this.value;rDoublons()">
          <option value="periode"${dblScope==='periode'?' selected':''}>Période affichée</option>
@@ -2540,7 +2588,7 @@ function importerFichierSage(input){
     try{
       const j=normaliserSage(lect.result, f.name);
       if(j){
-        sageData=j;
+        sageData=j; normaliserSensSage();
         sageMeta={fichier:f.name, pieces:j.length, source:'manuel',
                   periode:[(j.map(p=>p.date).filter(Boolean).sort()[0]||'?'),
                            (j.map(p=>p.date).filter(Boolean).sort().slice(-1)[0]||'?')],
@@ -2587,6 +2635,7 @@ function analyserSage(brut, nomFichier){
   });
 
   sageData = Object.values(parRef).map(g=>({...g, ht:Math.round(g.ht*100)/100}));
+  normaliserSensSage();
   sageMeta = {
     fichier: nomFichier, lignes: brut.length, lignesAchat: ach.length,
     pieces: sageData.length, colonnes:{cRef,cJou,cMon,cTie,cDat,cSec,cCpt},
@@ -2613,7 +2662,7 @@ function rapprocher(){
     const cand = parNorm[g.refNorm] || [];
     if(cand.length===0){ manquantes.push({sage:g}); return; }
     if(cand.length>1){ ambigues.push({sage:g, candidats:cand}); return; }
-    const f=cand[0], ht=pa(f.TotalHT), d=Math.round((g.ht-ht)*100)/100;
+    const f=cand[0], ht=Math.abs(pa(f.TotalHT)), d=Math.round((Math.abs(Number(g.ht)||0)-ht)*100)/100;
     (Math.abs(d)<=SEUIL_ECART ? ok : ecarts).push({sage:g, facture:f, ecart:d});
   });
   const rapprochees=new Set([...ok,...ecarts].map(x=>x.facture.CleUnique));
@@ -3196,6 +3245,7 @@ async function chargerSageDepuisSharePoint(silencieux){
     }
     if(pieces){
       sageData=pieces;
+      normaliserSensSage();
       sageMeta={ fichier:f.nom+' (SharePoint)', pieces:pieces.length, source:'sharepoint',
                  majFichier:new Date(f.modifie).toLocaleString('fr-FR'),
                  periode:[ (pieces.map(p=>p.date).filter(Boolean).sort()[0]||'?'),
@@ -3501,6 +3551,7 @@ function rImport(){
 
   el.innerHTML = modHeader('📤 Import Sage',
       `${impCandidats.length} facture(s) en attente d'imputation analytique · ${prets} prête(s)`)
+  + barrePeriode()
   + `<div class="sr" style="grid-template-columns:repeat(5,1fr)">
       ${statCard('green', sel.length,'Sélectionnées')}
       ${statCard('blue',  t.nbG+t.nbA,'Lignes à générer')}
@@ -3642,6 +3693,10 @@ function calculerPipeline(){
   // Étape 1 : côté Sage, un 488 débiteur sans facture lue en face
   (sageData||[]).forEach(g=>{
     if(g.a!=null && g.a<=0.005) return;              // déjà soldé
+    // v36 — la période s'applique aussi aux pièces Sage, sinon l'étape 1
+    // affiche tout l'historique alors que le reste est filtré.
+    if(per.du && (g.date||'') < per.du) return;
+    if(per.au && (g.date||'') > per.au) return;
     if(!parNorm[g.refNorm]) R.e1.push({sage:g});
   });
   // v34 — le montant de la pièce s'appelle « ht », pas « h ». L'erreur
@@ -3784,6 +3839,7 @@ function rDashboard(){
 
   el.innerHTML = modHeader('🏠 Tableau de bord',
       `Chaîne Yooz → Sage → IA → imputation analytique · export du ${esc(sageMeta.majFichier||sageMeta.horodatage)}`)
+  + barrePeriode()
   + `<div style="padding:0 24px 6px;display:flex;gap:12px;flex-wrap:wrap">
       ${['e1','e2','e3','e4','e5'].map(carte).join('')}
      </div>
@@ -3907,6 +3963,7 @@ function rPipeline(){
   }
 
   el.innerHTML = modHeader(`${E.ico} ${E.n}`, `${liste.length} facture(s) · ${fa(montantEtape(pipeEtape,R))} € HT`)
+   + barrePeriode()
    + `<div class="tlb">${onglets}
         <button class="btn bgho bsm" style="margin-left:auto" onclick="pipeline(true);rPipeline()">↻ Recalculer</button>
       </div>
@@ -3965,6 +4022,38 @@ function genererCorrection(i){
 
 function suivi488(){ return (sageData||[]).some(g=>g.a!=null); }
 
+// ── Sens comptable : détecté, jamais supposé ──────────────────
+// Une charge est au débit, donc positive. Mais la convention EC_Sens
+// (0 = débit ou 1 = débit) varie d'un paramétrage Sage à l'autre, et la
+// requête M la code en dur. Si elle est inversée, TOUTES les charges
+// arrivent négatives et chaque facture ressort en écart.
+// On regarde donc le signe dominant sur l'ensemble des pièces et on
+// retourne le tout si nécessaire. Les avoirs, minoritaires, conservent
+// leur signe opposé — ce qui reste l'information utile.
+let sensInverse=false;
+function normaliserSensSage(){
+  sensInverse=false;
+  if(!sageData || !sageData.length) return;
+  const cumul=sageData.reduce((s,g)=>s+(Number(g.ht)||0),0);
+  const nbNeg=sageData.filter(g=>(Number(g.ht)||0)<0).length;
+  if(cumul<0 || nbNeg > sageData.length*0.6){
+    sageData.forEach(g=>{
+      g.ht = -(Number(g.ht)||0);
+      if(g.a!=null) g.a = -(Number(g.a)||0);
+    });
+    sensInverse=true;
+    console.warn(`[sage] Sens comptable inversé détecté (${nbNeg}/${sageData.length} pièces négatives) — montants retournés. `
+               + `Cause probable : la convention EC_Sens de la requête M ne correspond pas à celle de votre Sage.`);
+  }
+}
+function bandeauSens(){
+  if(!sensInverse) return '';
+  return `<div style="padding:0 24px 8px"><div class="cp-bandeau wa"><span>🔁</span><span>
+    <strong>Sens comptable inversé détecté et corrigé automatiquement.</strong> Les charges arrivaient en négatif :
+    la convention <code>EC_Sens</code> de la requête Power Query ne correspond pas à celle de votre Sage.
+    Ça fonctionne ainsi, mais le corriger à la source éviterait la surprise ailleurs.</span></div></div>`;
+}
+
 const TOL_MONTANT = 0.02;
 let fiDepuis='', fiFourn='', fiCache=null, fiOnglet='synthese';
 
@@ -4003,10 +4092,15 @@ function analyserFiabilite(){
     lues++; M.lues++;
 
     const lignes=parCle[f.CleUnique]||[];
-    const htSage=Math.round(Math.abs(Number(g.ht)||0)*100)/100;
-    const htIA  =Math.round(pa(f.TotalHT)*100)/100;
+    // Comparaison en valeur absolue : un avoir est négatif dans Sage et
+    // positif dans SharePoint, ce qui n'est pas une erreur de lecture.
+    // Le sens divergent est signalé à part.
+    const brutSage=Math.round((Number(g.ht)||0)*100)/100;
+    const brutIA  =Math.round(pa(f.TotalHT)*100)/100;
+    const htSage=Math.abs(brutSage), htIA=Math.abs(brutIA);
     const ecart =Math.round((htIA-htSage)*100)/100;
     const mtOk  = htSage>0 && Math.abs(ecart)<=TOL_MONTANT;
+    const sensDiff = brutSage!==0 && brutIA!==0 && Math.sign(brutSage)!==Math.sign(brutIA);
 
     const cSage=comptesUtiles(g.comptes ? [...g.comptes] : []);
     const cIA  =comptesUtiles(lignes.map(l=>l.CompteComptable));
@@ -4020,7 +4114,7 @@ function analyserFiabilite(){
     if(cptOk) M.cptOk++;
     if(anaOk) M.anaOk++;
 
-    det.push({g, f, lignes, etat:'lue', htSage, htIA, ecart, mtOk, cptOk, anaOk,
+    det.push({g, f, lignes, etat:'lue', htSage, htIA, ecart, mtOk, cptOk, anaOk, sensDiff, brutSage,
               ratio: htIA? Math.round(htSage/htIA*1000)/1000 : null,
               cSage:[...cSage], cIA:[...cIA], sSage:[...sSage], sIA:[...sIA]});
   });
@@ -4182,7 +4276,7 @@ function rFiabilite(){
           <td class="mono" style="text-align:right">${fa(d.htIA)} €</td>
           <td class="mono" style="text-align:right">${fa(d.htSage)} €</td>
           <td class="mono" style="text-align:right;${d.mtOk?'':'color:var(--red);font-weight:600'}">${fa(d.ecart)} €</td>
-          <td class="mono" style="text-align:right;color:var(--g500)">${d.ratio??'—'}</td>
+          <td class="mono" style="text-align:right;color:var(--g500)">${d.ratio??'—'}${d.sensDiff?' <span class="badge bo2" style="font-size:9px" title="Sage et l\'IA n\'ont pas le même sens : avoir d\'un côté, facture de l\'autre ?">sens ≠</span>':''}</td>
           <td style="font-size:10.5px">${d.cptOk?'<span class="badge bg2">identiques</span>'
             :`<span style="color:var(--g600)">${esc(d.cIA.join(', ')||'—')}</span><br><span style="color:var(--red)">${esc(d.cSage.join(', ')||'—')}</span>`}</td>
           <td style="font-size:10.5px">${d.anaOk?'<span class="badge bg2">identiques</span>'
@@ -4194,6 +4288,8 @@ function rFiabilite(){
 
   el.innerHTML = modHeader('📐 Fiabilité de l\'IA',
       `${A.pieces} pièce(s) Sage analysée(s)${fiDepuis?` depuis le ${new Date(fiDepuis).toLocaleDateString('fr-FR')}`:''} · ${A.lues} lue(s) par l'IA`)
+   + bandeauSens()
+   + barrePeriode()
    + `<div class="tlb">${onglets}
         <span class="fsep"></span>
         <span class="flab">Comparer depuis</span>
