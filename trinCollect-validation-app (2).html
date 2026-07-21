@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures v19</title>
+<title>Tri'n'Collect — Validation Factures (v20)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -97,14 +97,12 @@ select.fs:focus{border-color:var(--green)}
 table{width:100%;border-collapse:collapse;background:white;border:1px solid var(--g200);border-radius:var(--r);overflow:hidden;font-size:13px}
 thead tr{background:var(--g50);border-bottom:1px solid var(--g200)}
 th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--g400);white-space:nowrap;cursor:pointer;user-select:none}
-th.th-id{width:56px;padding-right:6px}
 th:hover{color:var(--g700)}
 tbody tr{border-bottom:1px solid var(--g100);cursor:pointer;transition:background .1s}
 tbody tr:last-child{border-bottom:none}
 tbody tr:hover{background:var(--g50)}
 td{padding:11px 14px;vertical-align:middle}
 td.mono{font-family:var(--mono);font-size:12px}
-.col-id{width:52px;min-width:52px;max-width:52px}
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;white-space:nowrap}
 .bg2{background:var(--green-l);color:var(--green)}.bo2{background:var(--obg);color:var(--orange)}
 .br2{background:var(--rbg);color:var(--red)}.bp2{background:var(--pbg);color:var(--purple)}
@@ -251,6 +249,16 @@ td.mono{font-family:var(--mono);font-size:12px}
 .cp-input:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(30,122,74,.12)}
 .cp-input.dirty{border-color:var(--orange);background:var(--obg)}
 .cp-input.saved{border-color:var(--green);background:var(--green-l)}
+.cp-num{width:82px;text-align:right}
+.cp-sel{max-width:150px;border:1px solid var(--g200);border-radius:5px;padding:4px 6px;font-size:11.5px;font-family:var(--font);color:var(--g800);background:white;outline:none;transition:border-color .15s}
+.cp-sel:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(30,122,74,.12)}
+.cp-sel.dirty{border-color:var(--orange);background:var(--obg)}
+.cp-sel.saved{border-color:var(--green);background:var(--green-l)}
+.cp-sel.vide{border-color:var(--red);background:var(--rbg)}
+.cp-bandeau{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:7px;font-size:12px;margin-bottom:10px}
+.cp-bandeau.ok{background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}
+.cp-bandeau.wa{background:#fffbeb;border:1px solid #fcd34d;color:#92400e}
+.cp-bandeau.ko{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
 .cp-libelle{font-size:11px;color:var(--g500);font-style:italic;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cp-libelle.found{color:var(--green);font-style:normal;font-weight:500}
 .cp-save-row{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;border:none;cursor:pointer;font-size:12px;transition:all .15s;background:transparent;color:var(--g400)}
@@ -306,6 +314,12 @@ td.mono{font-family:var(--mono);font-size:12px}
   </div>
   <div class="sbd"></div>
   <div class="sbs">
+    <div class="sbl">Contrôles</div>
+    <div class="ni" onclick="setView('ec')" data-view="ec"><span class="nic">🔍</span>Écarts à revoir<span class="nb o" id="b-ec">0</span></div>
+    <div class="ni" onclick="setView('pj')" data-view="pj"><span class="nic">📎</span>PJ à examiner<span class="nb o" id="b-pj">0</span></div>
+  </div>
+  <div class="sbd"></div>
+  <div class="sbs">
     <div class="sbl">Analyse</div>
     <div class="ni" onclick="setView('st')" data-view="st"><span class="nic">📊</span>Statistiques</div>
   </div>
@@ -318,42 +332,33 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="ph"><div><div class="pt" id="ptl">À valider</div><div class="pst" id="pst">Factures en attente de validation</div></div></div>
     <div class="sr" id="sr"></div>
     <div class="tlb">
-      <div class="sbx"><input type="text" id="sq" placeholder="Fournisseur, n° facture, ID…" oninput="renderTable()"></div>
+      <div class="sbx"><input type="text" id="sq" placeholder="Fournisseur, n° facture…" oninput="renderTable()"></div>
       <select class="fs" id="fe" onchange="renderTable()"><option value="">Tous les établissements</option></select>
-      <select class="fs" id="fdc" onchange="onPeriodFilterChange()" title="Filtrer par date de création">
-        <option value="">&#128197; Création : toute période</option>
-        <option value="cm">Mois en cours</option>
-        <option value="pm">Mois précédent</option>
-        <option value="6m">6 derniers mois</option>
-        <option value="12m">12 derniers mois</option>
-      </select>
-      <select class="fs" id="fdf" onchange="renderTable()" title="Filtrer par date de facture">
-        <option value="">&#129534; Facture : toute période</option>
-        <option value="cm">Mois en cours</option>
-        <option value="pm">Mois précédent</option>
-        <option value="6m">6 derniers mois</option>
-        <option value="12m">12 derniers mois</option>
+      <select class="fs" id="fp" onchange="renderTable()">
+        <option value="">Toute période</option>
+        <option value="7">7 jours</option>
+        <option value="30">30 jours</option>
+        <option value="90">90 jours</option>
       </select>
     </div>
     <div class="tw">
       <table>
         <thead><tr>
-          <th class="th-id" onclick="srt('_id')" title="ID SharePoint de l'item">ID ↕</th>
           <th onclick="srt('Fournisseur')">Fournisseur ↕</th>
           <th onclick="srt('NumeroFacture')">N° Facture</th>
           <th onclick="srt('Typededocument')">Type</th>
-          <th onclick="srt('_created')" title="Date de création dans SharePoint">Créé ↕</th>
-          <th onclick="srt('DateFacture')">Date facture ↕</th>
+          <th onclick="srt('DateFacture')">Date ↕</th>
           <th onclick="srt('TotalTTC')">TTC ↕</th>
           <th>Établissement</th>
           <th>Statut</th>
           <th>Circuit</th>
           <th onclick="srt('DateEcheance')">Échéance</th>
         </tr></thead>
-        <tbody id="tbd"><tr class="ldr"><td colspan="11">Connexion requise…</td></tr></tbody>
+        <tbody id="tbd"><tr class="ldr"><td colspan="9">Connexion requise…</td></tr></tbody>
       </table>
     </div>
   </div>
+  <div id="vmod" style="display:none;flex-direction:column"></div>
   <div id="vstat" style="display:none">
     <div class="ph"><div><div class="pt">Statistiques</div><div class="pst">Vue d'ensemble du traitement</div></div></div>
     <div class="spg" id="sc"></div>
@@ -374,6 +379,7 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="ptab" onclick="stab('tp')" data-tab="tp">🖨️ Document</div>
     <div class="ptab" onclick="stab('tc')" data-tab="tc">💬 Commentaires <span class="tcnt" id="ccnt">0</span></div>
     <div class="ptab" onclick="stab('tcompta');loadLignes()" data-tab="tcompta">🧾 Infos Comptable <span class="tcnt" id="lcnt">—</span></div>
+    <div class="ptab" onclick="stab('thisto');loadHisto()" data-tab="thisto">📓 Historique <span class="tcnt" id="hcnt">—</span></div>
   </div>
   <div class="pbd">
     <div class="tc active" id="ti"></div>
@@ -381,6 +387,7 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="tc" id="tp"></div>
     <div class="tc" id="tc"></div>
     <div class="tc" id="tcompta"></div>
+    <div class="tc" id="thisto"></div>
   </div>
   <div class="abar" id="ab"></div>
 </div>
@@ -412,6 +419,11 @@ td.mono{font-family:var(--mono);font-size:12px}
       <p class="hint">Liste SharePoint contenant les lignes comptables des factures</p>
       <label>ID Liste Valideurs</label>
       <input id="cvi" placeholder="ID de la liste Valideurs dans SharePoint">
+      <label>ID Liste JournalCorrections</label>
+      <input id="cjid" placeholder="À créer — voir la note de mise en place v20">
+      <p class="hint">Sans cet ID, les corrections ne sont pas tracées (l'application fonctionne quand même)</p>
+      <label>ID Liste PJAExaminer</label>
+      <input id="cpjid" placeholder="dcbbe4c7-8089-448f-9e2d-fc858289d25d">
     </div>
     <div class="csec">
       <div class="csect">🔗 n8n Webhook</div>
@@ -437,6 +449,8 @@ const cfg={
   get llid() {return lgs('tnc_llid')||'185d9ee3-b6de-4a0d-b6e8-22056923e339'},
   get vid()  {return lgs('tnc_vid') ||''},
   get wh()   {return lgs('tnc_wh')  ||'https://tri-n-collect.app.n8n.cloud/webhook/Validation'},
+  get jid()  {return lgs('tnc_jid') ||''},   // v20 — liste JournalCorrections
+  get pjid() {return lgs('tnc_pjid')||'dcbbe4c7-8089-448f-9e2d-fc858289d25d'}, // v20 — PJAExaminer
 };
 function lgs(k){try{return localStorage.getItem(k)||''}catch(e){return''}}
 function lss(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -449,6 +463,8 @@ function openConfig(){
   document.getElementById('clli').value=cfg.llid;
   document.getElementById('cvi').value=cfg.vid;
   document.getElementById('cwh').value=cfg.wh;
+  document.getElementById('cjid').value=cfg.jid;
+  document.getElementById('cpjid').value=cfg.pjid;
   document.getElementById('cfgp').classList.add('open');
 }
 function closeConfig(){document.getElementById('cfgp').classList.remove('open')}
@@ -460,6 +476,8 @@ function saveConfig(){
   lss('tnc_llid',document.getElementById('clli').value.trim());
   lss('tnc_vid',document.getElementById('cvi').value.trim());
   lss('tnc_wh', document.getElementById('cwh').value.trim());
+  lss('tnc_jid', document.getElementById('cjid').value.trim());
+  lss('tnc_pjid',document.getElementById('cpjid').value.trim());
   closeConfig(); initMsal(); toast('✅ Config enregistrée','ok');
 }
 
@@ -521,17 +539,10 @@ lcmts();
 // ══ LOAD DATA ════════════════════════════════════════════════
 async function loadData(){
   if(!account)return;
-  document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="11">⏳ Chargement depuis SharePoint Lists…</td></tr>';
+  document.getElementById('tbd').innerHTML='<tr class="ldr"><td colspan="9">⏳ Chargement depuis SharePoint Lists…</td></tr>';
   try{
     // Colonnes à récupérer
-    // Construire l'URL avec filtre de date côté API Graph si période sélectionnée
-    const fdcVal=document.getElementById('fdc')?.value||'';
-    let graphFilter='';
-    if(fdcVal){
-      const {start}=getPeriodRange(fdcVal);
-      graphFilter=`&$filter=fields/Created ge '${start.toISOString()}'`;
-    }
-    let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields&$top=500${graphFilter}`;
+    let url=`/sites/${cfg.sid}/lists/${cfg.lid}/items?$expand=fields&$top=500`;
     let items=[];
     while(url){
       const d=await gGet(url);
@@ -541,17 +552,17 @@ async function loadData(){
     rows=items.map(it=>{
       const f=it.fields||{};
       const typeDoc=f.Typededocument||f.Type_x0020_de_x0020_document||f.TypeDocument||f.Typedocument||'';
-      return {_id:it.id,_created:it.createdDateTime||f.Created||'',_idNum:parseInt(it.id)||0,...f,Typededocument:typeDoc};
+      return {_id:it.id,...f,Typededocument:typeDoc};
     });
     etabs=[...new Set(rows.map(r=>r.EtablissementAffecte||'').filter(Boolean))].sort();
     const sel=document.getElementById('fe');
     sel.innerHTML='<option value="">Tous les établissements</option>'+etabs.map(e=>`<option value="${e}">${e}</option>`).join('');
-    document.getElementById('syn').textContent=`Sync ${new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} · ${rows.length} factures`;
+    document.getElementById('syn').textContent='Sync '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
     badges(); renderTable();
     if(curV==='st')renderStats();
   }catch(e){
     console.error(e);
-    document.getElementById('tbd').innerHTML=`<tr class="ldr"><td colspan="11">⚠️ ${esc(e.message)}<br><small>Vérifiez la configuration (⚙️) et vos droits SharePoint</small></td></tr>`;
+    document.getElementById('tbd').innerHTML=`<tr class="ldr"><td colspan="9">⚠️ ${esc(e.message)}<br><small>Vérifiez la configuration (⚙️) et vos droits SharePoint</small></td></tr>`;
     toast('⚠️ Erreur chargement','err');
   }
 }
@@ -567,14 +578,22 @@ const VIEWS={
 function setView(v){
   curV=v;
   document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.view===v));
+  const vl=document.getElementById('vlist'), vs=document.getElementById('vstat'), vm=document.getElementById('vmod');
+  // v20 : trois familles de vues — liste de factures, module de contrôle, statistiques
+  if(v==='pj'||v==='ec'){
+    vl.style.display='none'; vs.style.display='none'; vm.style.display='flex';
+    if(v==='pj') loadPJ(); else loadEcarts();
+    return;
+  }
+  vm.style.display='none';
   if(v==='st'){
-    document.getElementById('vlist').style.display='none';
-    document.getElementById('vstat').style.display='flex';
-    document.getElementById('vstat').style.flexDirection='column';
+    vl.style.display='none';
+    vs.style.display='flex';
+    vs.style.flexDirection='column';
     renderStats();
   } else {
-    document.getElementById('vlist').style.display='flex';
-    document.getElementById('vstat').style.display='none';
+    vl.style.display='flex';
+    vs.style.display='none';
     const vc=VIEWS[v];
     document.getElementById('ptl').textContent=vc.t;
     document.getElementById('pst').textContent=vc.s;
@@ -587,64 +606,30 @@ function badges(){
   document.getElementById('b-aa').textContent=rows.filter(r=>r.Statut==='À affecter').length;
   document.getElementById('b-vd').textContent=rows.filter(r=>r.Statut==='Validé - En attente comptabilité').length;
   document.getElementById('b-tt').textContent=rows.length;
+  // v20 — compteurs des modules de contrôle
+  try{
+    marquerDoublons();
+    const nEc=rows.filter(r=>Object.keys(ECARTS).some(k=>ECARTS[k].f(r))).length;
+    document.getElementById('b-ec').textContent=nEc;
+    const nPj=pjData.length?pjData.filter(p=>!estExamine(p)).length:'—';
+    document.getElementById('b-pj').textContent=nPj;
+  }catch(e){ /* modules pas encore chargés */ }
 }
 
 // ══ TABLE ════════════════════════════════════════════════════
-// ══ HELPERS PÉRIODE ═════════════════════════════════════════
-function getPeriodRange(code){
-  const now=new Date();
-  let start,end;
-  if(code==='cm'){
-    start=new Date(now.getFullYear(),now.getMonth(),1);
-    end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
-  } else if(code==='pm'){
-    start=new Date(now.getFullYear(),now.getMonth()-1,1);
-    end=new Date(now.getFullYear(),now.getMonth(),0,23,59,59,999);
-  } else if(code==='6m'){
-    start=new Date(now.getFullYear(),now.getMonth()-5,1);
-    end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
-  } else if(code==='12m'){
-    start=new Date(now.getFullYear(),now.getMonth()-11,1);
-    end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59,999);
-  } else {
-    start=new Date(0);end=new Date(9999,11,31);
-  }
-  return {start,end};
-}
-
-// Formater date courte pour la colonne Créé
-function fdShort(d){
-  if(!d)return '—';
-  const dt=pd(d);
-  if(!dt)return '—';
-  return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit'});
-}
-
-// Appelé quand le filtre "Date création" change : recharge si nécessaire
-function onPeriodFilterChange(){
-  // Recharger les données depuis SharePoint avec le filtre de date côté API
-  loadData();
-}
-
 function srt(c){if(sCol===c)sDir*=-1;else{sCol=c;sDir=-1;}renderTable();}
 function getRows(){
   const vc=VIEWS[curV];if(!vc)return[];
   let r=rows.filter(vc.f);
   const q=(document.getElementById('sq')?.value||'').toLowerCase().trim();
-  if(q)r=r.filter(x=>(x.Fournisseur||'').toLowerCase().includes(q)||(x.NumeroFacture||'').toLowerCase().includes(q)||(x.CleUnique||'').toLowerCase().includes(q)||(x._id||'').includes(q));
+  if(q)r=r.filter(x=>(x.Fournisseur||'').toLowerCase().includes(q)||(x.NumeroFacture||'').toLowerCase().includes(q)||(x.CleUnique||'').toLowerCase().includes(q));
   const et=document.getElementById('fe')?.value;
   if(et)r=r.filter(x=>(x.EtablissementAffecte||'')===et);
-  // Filtre par date de création
-  const fdc=document.getElementById('fdc')?.value;
-  if(fdc){const {start,end}=getPeriodRange(fdc);r=r.filter(x=>{const d=pd(x._created);return d&&d>=start&&d<=end;});}
-  // Filtre par date de facture
-  const fdf=document.getElementById('fdf')?.value;
-  if(fdf){const {start,end}=getPeriodRange(fdf);r=r.filter(x=>{const d=pd(x.DateFacture);return d&&d>=start&&d<=end;});}
+  const p=parseInt(document.getElementById('fp')?.value);
+  if(p){const cut=new Date();cut.setDate(cut.getDate()-p);r=r.filter(x=>{const d=pd(x.DateTraitement||x.DateFacture);return d&&d>=cut;});}
   r.sort((a,b)=>{
     let va=a[sCol]||'',vb=b[sCol]||'';
     if(sCol==='TotalTTC'){va=pa(va);vb=pa(vb);}
-    else if(sCol==='_id'){va=a._idNum||0;vb=b._idNum||0;}
-    else if(sCol==='_created'){va=pd(a._created)||new Date(0);vb=pd(b._created)||new Date(0);}
     else if(sCol.startsWith('Date')){va=pd(va)||new Date(0);vb=pd(vb)||new Date(0);}
     return va>vb?sDir:va<vb?-sDir:0;
   });
@@ -654,7 +639,7 @@ function renderTable(){
   const r=getRows();
   const tb=document.getElementById('tbd');
   if(!r.length){
-    tb.innerHTML=`<tr><td colspan="11"><div class="empty"><div class="ei">📭</div><div class="et">Aucune facture</div><div class="es">Aucune facture ne correspond aux filtres</div></div></td></tr>`;
+    tb.innerHTML=`<tr><td colspan="9"><div class="empty"><div class="ei">📭</div><div class="et">Aucune facture</div><div class="es">Aucune facture ne correspond</div></div></td></tr>`;
     document.getElementById('sr').innerHTML='';return;
   }
   const ttc=r.reduce((s,x)=>s+pa(x.TotalTTC),0);
@@ -666,11 +651,9 @@ function renderTable(){
     const st=STAT[x.Statut]||{c:'bgr2',i:'?'},ttc2=pa(x.TotalTTC),cle=x.CleUnique||'',nc=(cmts[cle]||[]).length,urg2=isUrg(x)?'🔴':'';
     const confBadge=x.Confidentiel?` <span title="Facture confidentielle" style="font-size:11px">🔒</span>`:'';
     return `<tr onclick="openPanel('${esc(cle)}')">
-      <td class="mono" style="font-size:11px;color:var(--g400);white-space:nowrap">${esc(x._id||'—')}</td>
       <td><strong>${esc(x.Fournisseur||'—')}</strong>${confBadge}${nc?` <span style="font-size:11px;color:var(--g400)">💬${nc}</span>`:''}${x.Alertes?` <span style="font-size:11px">⚠️</span>`:''}</td>
       <td class="mono">${esc(x.NumeroFacture||'—')}</td>
       <td>${docTypeBadge(x.Typededocument)}</td>
-      <td style="font-size:12px;color:var(--g500);white-space:nowrap">${fdShort(x._created)}</td>
       <td>${fd(x.DateFacture)}</td>
       <td class="amt${ttc2>5000?' ah':''}">${fa(ttc2)} €</td>
       <td>${esc(x.EtablissementAffecte||'—')}</td>
@@ -837,9 +820,19 @@ function rAbar(f){
   const canBlk=!['Rejeté','Validé - En attente comptabilité'].includes(s);
   const canUnblk=s==='Bloqué';
   let h='';
+  // v20 — garde-fous : on peut toujours corriger, mais pas valider
+  // une facture qui échoue à un contrôle bloquant.
+  const bloquants=controlesBloquants(f), alertes=controlesAlerte(f);
   if(canApp){
     const nAct=lm[s]!==undefined?lm[s]+1:1;
-    h+=`<a href="${cfg.wh}?action=approuver&facture=${cle}&niveau=${nAct}&email=${nm}&nom=${nm}&etablissement=${etab}" target="_blank" class="btn bpri">✅ Approuver (N${nAct})</a>`;
+    if(bloquants.length){
+      h+=`<button class="btn bpri" disabled style="opacity:.45;cursor:not-allowed"
+            title="${esc(bloquants.join(' · '))}">🔒 Approbation bloquée (${bloquants.length})</button>`;
+      h+=`<button class="btn bwrn" onclick="voirBloquants()">👁️ Voir les ${bloquants.length} blocage(s)</button>`;
+    } else {
+      h+=`<a href="${cfg.wh}?action=approuver&facture=${cle}&niveau=${nAct}&email=${nm}&nom=${nm}&etablissement=${etab}" target="_blank" class="btn bpri">✅ Approuver (N${nAct})</a>`;
+      if(alertes.length) h+=`<button class="btn bwrn bsm" onclick="voirBloquants()" title="${esc(alertes.join(' · '))}">⚠️ ${alertes.length} alerte(s)</button>`;
+    }
   }
   if(canBlk)h+=`<button class="btn bdan" onclick="showBlk()">⊘ Bloquer</button>`;
   h+=`<button class="btn bpur" onclick="showTrf()">→ Transférer</button>`;
@@ -1068,9 +1061,11 @@ async function loadLignes(){
   document.getElementById('tcompta').innerHTML=`<div class="cp-loading">⏳ Chargement des lignes comptables…</div>`;
 
   try{
-    const flds='CleUnique,NumeroLigne,Chantier,AdresseChantier,Designation,Quantite,Unite,PUHT,MontantHT,TVAPct,CompteComptable,LibelleCompte,Cl_x00e9_UniqueLigne,Title';
-    // Filtre : CleUnique startswith CleUnique de la facture
-    const filter=`startswith(fields/CleUnique,'${cle.replace(/'/g,"''")}')`;
+    // v19 : champs complémentaires pour l'édition (matière, agence, bon, date)
+    const flds='CleUnique,NumeroLigne,Chantier,AdresseChantier,NumBon,DateRotation,Designation,Mati_x00e8_re,Quantite,Unite,PUHT,MontantHT,TVAPct,CompteComptable,LibelleCompte,EtablissementAffecte,Cl_x00e9_UniqueLigne,Title';
+    // v19 : 'eq' et non 'startswith' — sinon une CleUnique préfixe d'une autre
+    // (ex. …|3260237 vs …|32602371) ramène les lignes de DEUX factures.
+    const filter=`fields/CleUnique eq '${cle.replace(/'/g,"''")}'`;
     const url=`/sites/${cfg.sid}/lists/${cfg.llid}/items?$expand=fields($select=${flds})&$filter=${encodeURIComponent(filter)}&$top=200&$orderby=fields/NumeroLigne`;
     const data=await gGet(url);
     lignesData=(data.value||[]).map(it=>({
@@ -1088,6 +1083,40 @@ async function loadLignes(){
   }
 }
 
+// ══ v19 — RÉFÉRENTIELS D'ÉDITION ═════════════════════════════
+// Listes proposées dans l'onglet Compta. Les valeurs déjà présentes
+// dans les données sont ajoutées automatiquement : on ne perd jamais
+// une valeur existante parce qu'elle manque au référentiel.
+const REF_MATIERES = ['DND en mélange','Bois A','Bois B','Gravats','Ferraille','Carton','Papier',
+  'Plâtre','Plastique','DEEE','Déchets dangereux','Amiante','Terre','Végétaux','Verre',
+  'Location','Transport','Prestation'];
+const REF_UNITES = ['T','KG','M3','U','FORFAIT','H','JOUR','ML'];
+
+function refAvec(base, valeurs){
+  const s = new Set(base);
+  valeurs.forEach(v => { if(v) s.add(String(v)); });
+  return [...s].sort((a,b)=>a.localeCompare(b,'fr'));
+}
+function refAgences(){
+  const cour = lignesData.map(l=>lval(l,'EtablissementAffecte'));
+  if(curF && curF.EtablissementAffecte) cour.push(curF.EtablissementAffecte);
+  return refAvec(etabs||[], cour);
+}
+function refMatieres(){ return refAvec(REF_MATIERES, lignesData.map(l=>lval(l,'Mati_x00e8_re'))); }
+function refUnites(){ return refAvec(REF_UNITES, lignesData.map(l=>lval(l,'Unite'))); }
+
+// Valeur courante d'un champ : modification en attente, sinon valeur SharePoint
+function lval(l, champ){
+  return (l._new && l._new[champ] !== undefined) ? l._new[champ] : l[champ];
+}
+function optionsHtml(liste, val, vide){
+  const cur = val==null ? '' : String(val);
+  const dedans = liste.some(o=>String(o)===cur);
+  return `<option value=""${cur===''?' selected':''}>${vide||'—'}</option>`
+    + (cur && !dedans ? `<option value="${esc(cur)}" selected>${esc(cur)}</option>` : '')
+    + liste.map(o=>`<option value="${esc(o)}"${String(o)===cur?' selected':''}>${esc(o)}</option>`).join('');
+}
+
 function rCompta(){
   const el=document.getElementById('tcompta');
   if(!lignesData.length){
@@ -1095,51 +1124,65 @@ function rCompta(){
     return;
   }
 
-  // ── Calculs exhaustivité ─────────────────────────────────
-  const totalLignesHT=lignesData.reduce((s,l)=>s+(l.MontantHT?parseFloat(l.MontantHT):0),0);
-  const totalFactureHT=curF?pa(curF.TotalHT):0;
+  const agences=refAgences(), matieres=refMatieres(), unites=refUnites();
+
+  // ── Cohérence de l'en-tête : HT + TVA − TTC ──────────────
+  const hHT=pa(curF&&curF.TotalHT), hTVA=pa(curF&&curF.TVA), hTTC=pa(curF&&curF.TotalTTC);
+  let coherenceHtml='';
+  if(hHT&&hTTC){
+    const dEnt=Math.round((hHT+hTVA-hTTC)*100)/100;
+    coherenceHtml = Math.abs(dEnt)<=0.02
+      ? `<div class="cp-bandeau ok"><span>✅</span><span><strong>En-tête cohérent</strong> — HT ${fa(hHT)} € + TVA ${fa(hTVA)} € = TTC ${fa(hTTC)} €</span></div>`
+      : `<div class="cp-bandeau ko"><span>🔴</span><span><strong>En-tête incohérent</strong> — HT + TVA − TTC = <strong>${fa(dEnt)} €</strong>. La lecture IA de l'en-tête est à revoir avant toute imputation.</span></div>`;
+  }
+
+  // ── Exhaustivité : Σ lignes vs Total HT en-tête ──────────
+  const totalLignesHT=lignesData.reduce((s,l)=>s+pa(lval(l,'MontantHT')),0);
+  const totalFactureHT=hHT;
   const ecart=Math.abs(totalLignesHT-totalFactureHT);
   let exhaustiviteHtml='';
   if(totalFactureHT>0){
     if(ecart<0.02){
-      exhaustiviteHtml=`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:7px;font-size:12px;color:#065f46;margin-bottom:10px">
-        <span style="font-size:14px">✅</span>
-        <span><strong>Totaux cohérents</strong> — Lignes HT : <strong>${fa(totalLignesHT)} €</strong> = Facture HT : <strong>${fa(totalFactureHT)} €</strong></span>
-      </div>`;
+      exhaustiviteHtml=`<div class="cp-bandeau ok"><span>✅</span><span><strong>Totaux cohérents</strong> — Lignes HT : <strong>${fa(totalLignesHT)} €</strong> = Facture HT : <strong>${fa(totalFactureHT)} €</strong></span></div>`;
     } else if(ecart<=1){
-      exhaustiviteHtml=`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:7px;font-size:12px;color:#92400e;margin-bottom:10px">
-        <span style="font-size:14px">⚠️</span>
-        <span><strong>Écart d'arrondi probable</strong> — Lignes HT : <strong>${fa(totalLignesHT)} €</strong> | Facture HT : <strong>${fa(totalFactureHT)} €</strong> | Écart : <strong>${fa(ecart)} €</strong></span>
-      </div>`;
+      exhaustiviteHtml=`<div class="cp-bandeau wa"><span>⚠️</span><span><strong>Écart d'arrondi probable</strong> — Lignes HT : <strong>${fa(totalLignesHT)} €</strong> | Facture HT : <strong>${fa(totalFactureHT)} €</strong> | Écart : <strong>${fa(ecart)} €</strong></span></div>`;
     } else {
-      exhaustiviteHtml=`<div style="padding:10px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;font-size:12px;color:#991b1b;margin-bottom:10px">
+      exhaustiviteHtml=`<div class="cp-bandeau ko" style="display:block">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:14px">🔴</span>
-            <span><strong>Écart significatif — lignes possiblement incomplètes</strong></span>
-          </div>
-          <button class="btn bdan bsm" onclick="signalerEcart(${fa(totalLignesHT)},${fa(totalFactureHT)},${fa(ecart)})">⚠️ Signaler</button>
+          <div style="display:flex;align-items:center;gap:8px"><span>🔴</span><span><strong>Écart significatif — lignes possiblement incomplètes</strong></span></div>
+          <button class="btn bdan bsm" onclick="signalerEcart('${fa(totalLignesHT)}','${fa(totalFactureHT)}','${fa(ecart)}')">⚠️ Signaler</button>
         </div>
         <div style="margin-top:6px;display:flex;gap:16px;flex-wrap:wrap">
           <span>Total facture HT : <strong>${fa(totalFactureHT)} €</strong></span>
           <span>Total lignes HT : <strong>${fa(totalLignesHT)} €</strong></span>
           <span>Écart : <strong>${fa(ecart)} €</strong></span>
         </div>
+        <div style="margin-top:6px;font-size:11px;opacity:.85">Rappel de doctrine : la référence comptable reste le <strong>Total HT en-tête</strong>. Cet écart est un contrôle interne de qualité de lecture.</div>
       </div>`;
     }
+  }
+
+  // ── Agences manquantes ───────────────────────────────────
+  const sansAgence=lignesData.filter(l=>!lval(l,'EtablissementAffecte')).length;
+  const sansCompte=lignesData.filter(l=>!lval(l,'CompteComptable')).length;
+  let manquesHtml='';
+  if(sansAgence||sansCompte){
+    const parts=[];
+    if(sansAgence) parts.push(`<strong>${sansAgence}</strong> ligne${sansAgence>1?'s':''} sans agence`);
+    if(sansCompte) parts.push(`<strong>${sansCompte}</strong> ligne${sansCompte>1?'s':''} sans compte`);
+    manquesHtml=`<div class="cp-bandeau wa"><span>⚠️</span><span>${parts.join(' · ')} — l'imputation analytique sera incomplète.</span></div>`;
   }
 
   // ── Sous-totaux par compte comptable ─────────────────────
   const parCompte={};
   lignesData.forEach(l=>{
-    const cc=(l.CompteComptable||'SANS COMPTE').trim();
-    const lib=l.LibelleCompte||getLibelle(cc)||'—';
+    const cc=(lval(l,'CompteComptable')||'SANS COMPTE').trim();
+    const lib=getLibelle(cc)||l.LibelleCompte||'—';
     if(!parCompte[cc])parCompte[cc]={lib,total:0,nb:0};
-    parCompte[cc].total+=parseFloat(l.MontantHT)||0;
+    parCompte[cc].total+=pa(lval(l,'MontantHT'));
     parCompte[cc].nb++;
   });
-  const comptesSorted=Object.keys(parCompte).sort();
-  const recapHtml=comptesSorted.map(cc=>{
+  const recapHtml=Object.keys(parCompte).sort().map(cc=>{
     const g=parCompte[cc];
     return`<tr>
       <td class="mono" style="font-size:11px;font-weight:600;color:var(--g700)">${esc(cc)}</td>
@@ -1149,35 +1192,47 @@ function rCompta(){
     </tr>`;
   }).join('');
 
+  // ── Sous-totaux par agence (imputation analytique) ───────
+  const parAgence={};
+  lignesData.forEach(l=>{
+    const a=lval(l,'EtablissementAffecte')||'— NON AFFECTÉE —';
+    if(!parAgence[a])parAgence[a]={total:0,nb:0};
+    parAgence[a].total+=pa(lval(l,'MontantHT'));
+    parAgence[a].nb++;
+  });
+  const recapAgHtml=Object.keys(parAgence).sort().map(a=>{
+    const g=parAgence[a], orphelin=a.startsWith('—');
+    return`<tr>
+      <td style="font-size:12px;${orphelin?'color:var(--red);font-weight:600':'color:var(--g700)'}">${esc(a)}</td>
+      <td style="text-align:center;font-size:11px;color:var(--g400)">${g.nb}</td>
+      <td class="mono" style="text-align:right;font-weight:600;color:var(--g900)">${fa(g.total)} €</td>
+    </tr>`;
+  }).join('');
+
   // ── Lignes détail ─────────────────────────────────────────
   const dirtyCount=lignesData.filter(l=>l._dirty).length;
   const rows2=lignesData.map((l,i)=>{
-    const cc=esc(l.CompteComptable||'');
-    const lib=esc(l.LibelleCompte||getLibelle(l.CompteComptable)||'');
-    const libClass=lib?'cp-libelle found':'cp-libelle';
+    const cc=lval(l,'CompteComptable')||'';
+    const lib=getLibelle(cc)||l.LibelleCompte||'';
+    const ag=lval(l,'EtablissementAffecte')||'';
+    const ch=c=>(l._new&&l._new[c]!==undefined)?' dirty':'';
     return`<tr id="cp-row-${i}">
       <td class="mono" style="color:var(--g500);font-size:11px">${esc(l.NumeroLigne||String(i+1))}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.Designation||'')}">${esc(l.Designation||'—')}</td>
-      <td style="text-align:right">${l.Quantite!=null?Number(l.Quantite).toLocaleString('fr-FR',{maximumFractionDigits:3}):'—'}</td>
-      <td>${esc(l.Unite||'')}</td>
-      <td class="mono" style="text-align:right">${l.PUHT!=null?fa(l.PUHT):'—'}</td>
-      <td class="mono" style="text-align:right;font-weight:600">${l.MontantHT!=null?fa(l.MontantHT):'—'}</td>
-      <td style="text-align:right">${l.TVAPct!=null?l.TVAPct+'%':'—'}</td>
-      <td>
-        <input class="cp-input" id="cp-cc-${i}" value="${cc}" maxlength="10"
-          oninput="onCCChange(${i},this.value)"
-          onblur="onCCBlur(${i},this.value)"
-          placeholder="ex: 606300">
-      </td>
-      <td><div class="${libClass}" id="cp-lib-${i}" title="${lib}">${lib||'<span style="color:var(--g300)">—</span>'}</div></td>
-      <td>
-        <button class="cp-save-row" id="cp-sv-${i}" title="Sauvegarder cette ligne" onclick="saveLigne(${i})">💾</button>
-      </td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.Designation||'')}">${esc(l.Designation||'—')}</td>
+      <td><select class="cp-sel${ch('Mati_x00e8_re')}" onchange="setL(${i},'Mati_x00e8_re',this.value)">${optionsHtml(matieres,lval(l,'Mati_x00e8_re'))}</select></td>
+      <td><input class="cp-input cp-num${ch('Quantite')}" type="number" step="0.001" value="${lval(l,'Quantite')??''}" onchange="setL(${i},'Quantite',this.value,1)"></td>
+      <td><select class="cp-sel${ch('Unite')}" style="max-width:88px" onchange="setL(${i},'Unite',this.value)">${optionsHtml(unites,lval(l,'Unite'))}</select></td>
+      <td><input class="cp-input cp-num${ch('PUHT')}" type="number" step="0.0001" value="${lval(l,'PUHT')??''}" onchange="setL(${i},'PUHT',this.value,1)"></td>
+      <td><input class="cp-input cp-num${ch('MontantHT')}" type="number" step="0.01" value="${lval(l,'MontantHT')??''}" onchange="setL(${i},'MontantHT',this.value)"></td>
+      <td style="text-align:right;font-size:11px;color:var(--g400)">${l.TVAPct!=null?l.TVAPct+'%':'—'}</td>
+      <td><input class="cp-input${ch('CompteComptable')}" id="cp-cc-${i}" value="${esc(cc)}" maxlength="10" onchange="setL(${i},'CompteComptable',this.value)" placeholder="ex: 606300"></td>
+      <td><div class="cp-libelle${lib?' found':''}" id="cp-lib-${i}" title="${esc(lib)}">${lib?esc(lib):'<span style="color:var(--g300)">—</span>'}</div></td>
+      <td><select class="cp-sel${ch('EtablissementAffecte')}${ag?'':' vide'}" onchange="setL(${i},'EtablissementAffecte',this.value)">${optionsHtml(agences,ag,'— non affectée —')}</select></td>
+      <td><button class="cp-save-row" id="cp-sv-${i}" title="Sauvegarder cette ligne" onclick="saveLigne(${i})">💾</button></td>
     </tr>`;
   }).join('');
 
   el.innerHTML=`
-    <!-- En-tête résumé -->
     <div style="margin-bottom:10px;padding:10px 12px;background:var(--g50);border:1px solid var(--g200);border-radius:8px;display:flex;gap:16px;font-size:12px;flex-wrap:wrap;align-items:center">
       <span>📦 <strong>${lignesData.length}</strong> ligne${lignesData.length>1?'s':''}</span>
       <span>💰 Total lignes HT : <strong>${fa(totalLignesHT)} €</strong></span>
@@ -1185,49 +1240,72 @@ function rCompta(){
       <span style="margin-left:auto">${dirtyCount?`<span style="color:var(--orange)">✏️ <strong>${dirtyCount}</strong> modif. en attente</span>`:'<span style="color:var(--green)">✅ Tout sauvegardé</span>'}</span>
     </div>
 
-    <!-- Bandeau exhaustivité -->
+    ${coherenceHtml}
     ${exhaustiviteHtml}
+    ${manquesHtml}
 
-    <!-- Récapitulatif par compte -->
-    <div style="margin-bottom:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--g400);margin-bottom:6px">📊 Récapitulatif par compte comptable</div>
-      <div style="border:1px solid var(--g200);border-radius:8px;overflow:hidden">
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="background:var(--g50);border-bottom:1px solid var(--g200)">
-            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--g400)">Compte</th>
-            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--g400)">Libellé</th>
-            <th style="padding:7px 10px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--g400)">Lignes</th>
-            <th style="padding:7px 10px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--g400)">Sous-total HT</th>
-          </tr></thead>
-          <tbody>${recapHtml}</tbody>
-          <tfoot><tr style="background:var(--green-l);border-top:2px solid #a7d9be">
-            <td colspan="2" style="padding:7px 10px;font-size:12px;font-weight:700;color:var(--green)">TOTAL</td>
-            <td style="padding:7px 10px;text-align:center;font-size:11px;font-weight:600;color:var(--green)">${lignesData.length}</td>
-            <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:700;color:var(--green);font-family:var(--mono)">${fa(totalLignesHT)} €</td>
-          </tr></tfoot>
-        </table>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--g400);margin-bottom:6px">📊 Par compte comptable</div>
+        <div style="border:1px solid var(--g200);border-radius:8px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:var(--g50);border-bottom:1px solid var(--g200)">
+              <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Compte</th>
+              <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Libellé</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Nb</th>
+              <th style="padding:7px 10px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Sous-total HT</th>
+            </tr></thead>
+            <tbody>${recapHtml}</tbody>
+            <tfoot><tr style="background:var(--green-l);border-top:2px solid #a7d9be">
+              <td colspan="2" style="padding:7px 10px;font-size:12px;font-weight:700;color:var(--green)">TOTAL</td>
+              <td style="padding:7px 10px;text-align:center;font-size:11px;font-weight:600;color:var(--green)">${lignesData.length}</td>
+              <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:700;color:var(--green);font-family:var(--mono)">${fa(totalLignesHT)} €</td>
+            </tr></tfoot>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--g400);margin-bottom:6px">🏢 Par agence (imputation analytique)</div>
+        <div style="border:1px solid var(--g200);border-radius:8px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:var(--g50);border-bottom:1px solid var(--g200)">
+              <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Agence</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Nb</th>
+              <th style="padding:7px 10px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--g400)">Sous-total HT</th>
+            </tr></thead>
+            <tbody>${recapAgHtml}</tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <!-- Tableau détail lignes -->
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--g400);margin-bottom:6px">🧾 Détail des lignes</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--g400)">🧾 Détail des lignes</div>
+      <input class="cp-input" id="cp-motif" style="width:230px;font-family:var(--font)" placeholder="Motif de la correction (journalisé)" value="${esc(motifCourant)}" onchange="motifCourant=this.value">
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn bgho bsm" onclick="propagerAgence()" title="Applique l'agence de l'en-tête à toutes les lignes">🏢 Propager l'agence d'en-tête</button>
+        <button class="btn bgho bsm" onclick="recalculerMontants()" title="Montant HT = Quantité × PU HT">🧮 Recalculer les montants</button>
+        <button class="btn bgho bsm" onclick="annulerModifs()" ${dirtyCount?'':'disabled'}>↺ Annuler</button>
+      </div>
+    </div>
     <div class="cptab-wrap">
       <table class="cptab">
         <thead><tr>
-          <th>N° L.</th><th>Désignation</th><th style="text-align:right">Qté</th><th>Unité</th>
+          <th>N° L.</th><th>Désignation</th><th>Matière</th><th style="text-align:right">Qté</th><th>Unité</th>
           <th style="text-align:right">PU HT</th><th style="text-align:right">Montant HT</th>
-          <th style="text-align:right">TVA</th><th>Compte</th><th>Libellé</th><th></th>
+          <th style="text-align:right">TVA</th><th>Compte</th><th>Libellé</th><th>Agence</th><th></th>
         </tr></thead>
         <tbody>${rows2}</tbody>
       </table>
     </div>
     <div class="cp-footer">
-      <div class="cp-footer-info">Modifier le Compte Comptable puis sauvegarder ligne par ligne ou tout d'un coup</div>
+      <div class="cp-footer-info">Modifier une cellule puis sauvegarder ligne par ligne ou tout d'un coup</div>
       <button class="cp-save-all" id="cp-save-all" onclick="saveAllLignes()" ${!dirtyCount?'disabled':''}>
         💾 Tout sauvegarder${dirtyCount?` (${dirtyCount})`:''}
       </button>
     </div>`;
 }
+
 
 function signalerEcart(totalLignes, totalFacture, ecart){
   if(!curF)return;
@@ -1245,96 +1323,499 @@ function signalerEcart(totalLignes, totalFacture, ecart){
   toast('⚠️ Anomalie signalée dans les commentaires','err');
 }
 
-function onCCChange(i, val){
-  const inp=document.getElementById(`cp-cc-${i}`);
-  const libEl=document.getElementById(`cp-lib-${i}`);
-  const svEl=document.getElementById(`cp-sv-${i}`);
-  if(!inp||!libEl)return;
-  lignesData[i]._newCC=val.trim();
-  lignesData[i]._dirty=true;
-  inp.classList.add('dirty');inp.classList.remove('saved');
-  svEl&&svEl.classList.add('pending');
-  // Mise à jour libellé en temps réel
-  const lib=getLibelle(val.trim());
-  if(lib){
-    libEl.textContent=lib;
-    libEl.className='cp-libelle found';
-    libEl.title=lib;
-  } else {
-    libEl.innerHTML='<span style="color:var(--g300)">—</span>';
-    libEl.className='cp-libelle';
-    libEl.title='';
+// ══ v19 — ÉDITION MULTI-CHAMPS ═══════════════════════════════
+// Champs éditables et leur nom interne SharePoint. Attention :
+// « Matière » s'appelle Mati_x00e8_re côté liste (accent encodé).
+const CHAMPS_LIGNE = ['Mati_x00e8_re','Quantite','Unite','PUHT','MontantHT','CompteComptable','EtablissementAffecte'];
+const CHAMPS_NUM   = ['Quantite','PUHT','MontantHT'];
+
+function setL(i, champ, val, autoMontant){
+  const l=lignesData[i]; if(!l) return;
+  if(!l._new) l._new={};
+  const v = CHAMPS_NUM.includes(champ)
+    ? (val===''||val==null||isNaN(val) ? null : Number(val))
+    : String(val);
+
+  // Revenir à la valeur d'origine efface la modification en attente
+  if(String(v??'')===String(l[champ]??'')) delete l._new[champ];
+  else l._new[champ]=v;
+
+  // Montant HT suit Quantité × PU, sauf saisie manuelle du montant
+  if(autoMontant){
+    const q=pa(lval(l,'Quantite')), pu=pa(lval(l,'PUHT'));
+    if(q&&pu){
+      const m=Math.round(q*pu*100)/100;
+      if(String(m)!==String(l.MontantHT??'')) l._new.MontantHT=m; else delete l._new.MontantHT;
+    }
   }
+
+  l._dirty = Object.keys(l._new).length>0;
+  rCompta();
 }
 
-function onCCBlur(i, val){
-  // Rien de spécial, déjà géré dans onCCChange
+function propagerAgence(){
+  const a = curF && curF.EtablissementAffecte;
+  if(!a){ toast("⚠️ L'en-tête n'a pas d'agence à propager",'err'); return; }
+  lignesData.forEach((l,i)=>{
+    if(!l._new) l._new={};
+    if(String(a)===String(l.EtablissementAffecte??'')) delete l._new.EtablissementAffecte;
+    else l._new.EtablissementAffecte=a;
+    l._dirty=Object.keys(l._new).length>0;
+  });
+  rCompta();
+  toast(`🏢 Agence « ${a} » appliquée à ${lignesData.length} ligne(s) — pensez à sauvegarder`);
 }
 
+function recalculerMontants(){
+  let n=0;
+  lignesData.forEach(l=>{
+    const q=pa(lval(l,'Quantite')), pu=pa(lval(l,'PUHT'));
+    if(!q||!pu) return;
+    const m=Math.round(q*pu*100)/100;
+    if(!l._new) l._new={};
+    if(String(m)===String(l.MontantHT??'')) delete l._new.MontantHT;
+    else { l._new.MontantHT=m; n++; }
+    l._dirty=Object.keys(l._new).length>0;
+  });
+  rCompta();
+  toast(n?`🧮 ${n} montant(s) recalculé(s) — pensez à sauvegarder`:'Aucun montant à recalculer');
+}
+
+function annulerModifs(){
+  lignesData.forEach(l=>{ delete l._new; l._dirty=false; });
+  rCompta();
+  toast('↺ Modifications annulées');
+}
+
+// Renvoie true si la sauvegarde a réussi, false sinon.
+// v19 : ne relance JAMAIS l'exception — c'est saveAllLignes qui
+// exploite la valeur de retour pour compter les échecs.
 async function saveLigne(i){
-  const l=lignesData[i];if(!l)return;
-  const newCC=(l._newCC!==undefined?l._newCC:l.CompteComptable)||'';
-  const newLib=getLibelle(newCC)||l.LibelleCompte||'';
+  const l=lignesData[i]; if(!l) return false;
+  if(!l._new || !Object.keys(l._new).length){ return true; }
+
   const svEl=document.getElementById(`cp-sv-${i}`);
-  const inp=document.getElementById(`cp-cc-${i}`);
-  if(svEl)svEl.textContent='⏳';
+  if(svEl) svEl.textContent='⏳';
+
+  const fields={};
+  CHAMPS_LIGNE.forEach(c=>{ if(l._new[c]!==undefined) fields[c]=l._new[c]; });
+  if(fields.CompteComptable!==undefined){
+    fields.LibelleCompte = getLibelle(fields.CompteComptable) || l.LibelleCompte || '';
+  }
+  // v20 — capturer les valeurs AVANT le PATCH pour le journal
+  const entreesJournal = Object.keys(fields)
+    .filter(c=>c!=='LibelleCompte')
+    .map(c=>({ cible:'Ligne '+(l.NumeroLigne||i+1), champ:LIBELLE_CHAMP[c]||c,
+               avant:l[c], apres:fields[c], cleLigne:l.Cl_x00e9_UniqueLigne||'' }));
+
   try{
     const tok=await getToken();
     const url=`https://graph.microsoft.com/v1.0/sites/${cfg.sid}/lists/${cfg.llid}/items/${l._spId}/fields`;
     const res=await fetch(url,{
       method:'PATCH',
       headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
-      body:JSON.stringify({CompteComptable:newCC,LibelleCompte:newLib})
+      body:JSON.stringify(fields)
     });
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${res.status}`);}
-    lignesData[i].CompteComptable=newCC;
-    lignesData[i].LibelleCompte=newLib;
-    lignesData[i]._dirty=false;
-    delete lignesData[i]._newCC;
-    inp&&inp.classList.remove('dirty');inp&&inp.classList.add('saved');
-    svEl&&(svEl.textContent='✅');svEl&&svEl.classList.remove('pending');
-    setTimeout(()=>{
-      const sv2=document.getElementById(`cp-sv-${i}`);
-      if(sv2){sv2.textContent='💾';sv2.classList.remove('pending');}
-      const in2=document.getElementById(`cp-cc-${i}`);
-      if(in2)in2.classList.remove('saved');
-      rComptaFooter();
-    },1800);
-    toast('✅ Ligne sauvegardée','ok');
+
+    Object.assign(l, fields);
+    delete l._new; l._dirty=false;
+    if(svEl){ svEl.textContent='✅'; svEl.classList.remove('pending'); }
+    // v20 — journalisation (non bloquante : le PATCH a déjà réussi)
+    journaliser(curF?.CleUnique||'', curF?.NumeroFacture||'', entreesJournal, motifCourant);
+    histoCle='';
+    setTimeout(()=>{ const s2=document.getElementById(`cp-sv-${i}`); if(s2) s2.textContent='💾'; }, 1600);
+    return true;
   }catch(e){
     console.error('saveLigne error:',e);
-    if(svEl){svEl.textContent='⚠️';svEl.classList.remove('pending');}
-    toast('⚠️ Erreur sauvegarde : '+e.message,'err');
-    setTimeout(()=>{const sv2=document.getElementById(`cp-sv-${i}`);if(sv2)sv2.textContent='💾';},2500);
+    if(svEl){ svEl.textContent='⚠️'; svEl.classList.remove('pending'); }
+    toast('⚠️ Erreur sauvegarde ligne '+(l.NumeroLigne||i+1)+' : '+e.message,'err');
+    setTimeout(()=>{ const s2=document.getElementById(`cp-sv-${i}`); if(s2) s2.textContent='💾'; }, 2500);
+    return false;
   }
 }
 
 async function saveAllLignes(){
-  const dirty=lignesData.map((l,i)=>({l,i})).filter(({l})=>l._dirty);
-  if(!dirty.length){toast('Aucune modification à sauvegarder');return;}
+  const aFaire=lignesData.map((l,i)=>({l,i})).filter(({l})=>l._dirty);
+  if(!aFaire.length){ toast('Aucune modification à sauvegarder'); return; }
+
   const btn=document.getElementById('cp-save-all');
-  if(btn){btn.disabled=true;btn.innerHTML='⏳ Sauvegarde…';}
-  let ok=0,err=0;
-  for(const {i} of dirty){
-    try{await saveLigne(i);ok++;}catch(e){err++;console.error(e);}
+  if(btn){ btn.disabled=true; btn.innerHTML='⏳ Sauvegarde…'; }
+
+  let ok=0, err=0;
+  for(const {i} of aFaire){
+    // v19 : saveLigne renvoie un booléen. L'ancienne version comptait
+    // les erreurs dans un catch qui ne se déclenchait jamais, donc le
+    // message final annonçait un succès même quand tout échouait.
+    const r = await saveLigne(i);
+    if(r) ok++; else err++;
   }
-  if(btn){btn.disabled=false;btn.innerHTML=`💾 Tout sauvegarder`;}
-  rComptaFooter();
-  if(err===0)toast(`✅ ${ok} ligne${ok>1?'s':''} sauvegardée${ok>1?'s':''}`, 'ok');
-  else toast(`⚠️ ${ok} ok / ${err} erreur${err>1?'s':''}`, 'err');
+
+  rCompta();
+  if(err===0) toast(`✅ ${ok} ligne${ok>1?'s':''} sauvegardée${ok>1?'s':''}`,'ok');
+  else toast(`⚠️ ${ok} sauvegardée(s) / ${err} en échec — les lignes en échec restent modifiées`,'err');
 }
 
 function rComptaFooter(){
   const dirtyCount=lignesData.filter(l=>l._dirty).length;
-  const totalLignesHT=lignesData.reduce((s,l)=>s+(l.MontantHT?parseFloat(l.MontantHT):0),0);
   const btnEl=document.getElementById('cp-save-all');
-  if(btnEl){btnEl.disabled=!dirtyCount;btnEl.innerHTML=`💾 Tout sauvegarder${dirtyCount?` (${dirtyCount})`:''}`;}
+  if(btnEl){ btnEl.disabled=!dirtyCount; btnEl.innerHTML=`💾 Tout sauvegarder${dirtyCount?` (${dirtyCount})`:''}`; }
+}
+
+// Compatibilité avec l'ancien nommage
+function onCCChange(i,val){ setL(i,'CompteComptable',val); }
+function onCCBlur(){}
+
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v20 — JOURNAL, PJ À EXAMINER, ÉCARTS À REVOIR, GARDE-FOUS
+// ═══════════════════════════════════════════════════════════════
+
+// ── Helpers Graph en écriture ─────────────────────────────────
+async function gWrite(method, path, body){
+  const tok=await getToken();
+  const res=await fetch(`https://graph.microsoft.com/v1.0${path}`,{
+    method,
+    headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.error?.message||`HTTP ${res.status}`); }
+  return res.status===204?{}:res.json();
+}
+function moi(){ return account ? (account.name||account.username) : 'Utilisateur'; }
+
+// ══ JOURNAL DES CORRECTIONS ═══════════════════════════════════
+// Écrit une ligne par champ modifié dans la liste JournalCorrections.
+// Volontairement NON bloquant : le PATCH métier a déjà réussi quand on
+// arrive ici. Un journal en échec est signalé, il n'annule pas la
+// correction — sinon on perdrait le travail de l'utilisateur.
+async function journaliser(cleUnique, numeroFacture, entrees, motif){
+  if(!cfg.jid){ console.warn('[journal] liste non configurée — journalisation ignorée'); return false; }
+  const horo=new Date().toISOString();
+  let ok=0, ko=0;
+  for(const e of entrees){
+    try{
+      await gWrite('POST', `/sites/${cfg.sid}/lists/${cfg.jid}/items`, { fields:{
+        Title:          `${horo.slice(0,19)} ${cleUnique}`,
+        CleUnique:      cleUnique||'',
+        NumeroFacture:  numeroFacture||'',
+        CleUniqueLigne: e.cleLigne||'',
+        Cible:          e.cible||'',
+        Champ:          e.champ||'',
+        Avant:          String(e.avant??''),
+        Apres:          String(e.apres??''),
+        Utilisateur:    moi(),
+        Motif:          motif||'—',
+        Horodatage:     horo
+      }});
+      ok++;
+    }catch(err){ ko++; console.error('[journal]',err); }
+  }
+  if(ko) toast(`⚠️ Journal : ${ko} entrée(s) non enregistrée(s) — la correction elle-même est bien sauvegardée`,'err');
+  return ko===0;
+}
+
+let histoData=[], histoCle='';
+async function loadHisto(){
+  const f=curF; if(!f) return;
+  const cle=f.CleUnique||'';
+  if(histoCle===cle && histoData.length){ rHisto(); return; }
+  const el=document.getElementById('thisto');
+  if(!cfg.jid){
+    el.innerHTML=`<div class="cp-empty"><div style="font-size:32px">📓</div><div style="font-size:14px;font-weight:500">Journal non configuré</div><div style="font-size:12px;color:var(--g400)">Renseignez l'ID de la liste JournalCorrections dans ⚙️ Paramètres</div></div>`;
+    return;
+  }
+  el.innerHTML=`<div class="cp-loading">⏳ Chargement de l'historique…</div>`;
+  try{
+    const filter=encodeURIComponent(`fields/CleUnique eq '${cle.replace(/'/g,"''")}'`);
+    const d=await gGet(`/sites/${cfg.sid}/lists/${cfg.jid}/items?$expand=fields&$filter=${filter}&$top=200`);
+    histoData=(d.value||[]).map(it=>it.fields||{});
+    histoData.sort((a,b)=>String(b.Horodatage||'').localeCompare(String(a.Horodatage||'')));
+    histoCle=cle;
+    document.getElementById('hcnt').textContent=histoData.length||'0';
+    rHisto();
+  }catch(e){
+    el.innerHTML=`<div class="cp-empty"><div style="font-size:28px">⚠️</div><div style="font-size:13px;color:var(--g500)">${esc(e.message)}</div></div>`;
+  }
+}
+function rHisto(){
+  const el=document.getElementById('thisto');
+  if(!histoData.length){
+    el.innerHTML=`<div class="cp-empty"><div style="font-size:32px">📓</div><div style="font-size:14px;font-weight:500">Aucune correction enregistrée</div><div style="font-size:12px;color:var(--g400)">Cette facture n'a pas été modifiée depuis l'application</div></div>`;
+    return;
+  }
+  el.innerHTML=`<div class="cptab-wrap"><table class="cptab">
+    <thead><tr><th>Date</th><th>Utilisateur</th><th>Cible</th><th>Champ</th><th>Avant</th><th>Après</th><th>Motif</th></tr></thead>
+    <tbody>${histoData.map(h=>`<tr>
+      <td class="mono" style="font-size:11px;white-space:nowrap">${esc(String(h.Horodatage||'').slice(0,16).replace('T',' '))}</td>
+      <td style="font-size:12px">${esc(h.Utilisateur||'—')}</td>
+      <td style="font-size:12px;color:var(--g500)">${esc(h.Cible||'—')}</td>
+      <td style="font-size:12px;font-weight:600">${esc(h.Champ||'—')}</td>
+      <td style="font-size:12px;color:var(--red)"><s>${esc(h.Avant||'(vide)')}</s></td>
+      <td style="font-size:12px;color:var(--green);font-weight:600">${esc(h.Apres||'(vide)')}</td>
+      <td style="font-size:11px;color:var(--g500);max-width:220px">${esc(h.Motif||'—')}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+// ══ GARDE-FOUS ════════════════════════════════════════════════
+// Politique retenue : on peut TOUJOURS corriger une ligne, même sur une
+// facture incohérente — sinon elle serait irréparable. Le blocage porte
+// uniquement sur le passage en validation.
+function estDechets(f){
+  const v=f.Est_Dechets;
+  return v===true||v==='true'||v==='Oui'||v===1||v==='1';
+}
+function controlesBloquants(f){
+  if(!f) return [];
+  const out=[];
+  const ht=pa(f.TotalHT), tva=pa(f.TVA), ttc=pa(f.TotalTTC);
+
+  if(ht&&ttc){
+    const d=Math.round((ht+tva-ttc)*100)/100;
+    if(Math.abs(d)>0.02) out.push(`En-tête incohérent : HT + TVA − TTC = ${fa(d)} €`);
+  }
+  if(!f.EtablissementAffecte) out.push(`Aucune agence affectée sur l'en-tête`);
+  if(estDechets(f) && f.EtablissementAffecte==='Siège')
+    out.push(`Flux déchets affecté au Siège — l'agence du chantier est obligatoire`);
+
+  // Contrôles de lignes uniquement si l'onglet Compta a été ouvert
+  if(lignesLoaded && lignesCleUnique===(f.CleUnique||'') && lignesData.length){
+    const sansCpt=lignesData.filter(l=>!lval(l,'CompteComptable')).length;
+    const sansAg =lignesData.filter(l=>!lval(l,'EtablissementAffecte')).length;
+    const nonSauv=lignesData.filter(l=>l._dirty).length;
+    if(sansCpt) out.push(`${sansCpt} ligne(s) sans compte comptable`);
+    if(sansAg)  out.push(`${sansAg} ligne(s) sans agence`);
+    if(nonSauv) out.push(`${nonSauv} modification(s) de ligne non sauvegardée(s)`);
+  }
+  return out;
+}
+// Non bloquant : signalé mais n'empêche pas la validation (doctrine :
+// la référence comptable est le Total HT en-tête, pas la somme des lignes).
+function controlesAlerte(f){
+  if(!f) return [];
+  const out=[];
+  const ec=pa(f._Ecart_Total);
+  if(Math.abs(ec)>0.02) out.push(`Écart lignes / en-tête de ${fa(ec)} € — qualité de lecture à vérifier`);
+  if(f._A_Revoir===true||f._A_Revoir==='true') out.push(`Facture marquée « à revoir » par le traitement IA`);
+  return out;
+}
+
+// ══ MODULE : PJ À EXAMINER ════════════════════════════════════
+let pjData=[], pjFiltre='';
+async function loadPJ(){
+  const el=document.getElementById('vmod');
+  if(!cfg.pjid){
+    el.innerHTML=modHeader('📎 PJ à examiner','Pièces jointes rejetées par le traitement IA')
+      +`<div class="empty" style="margin:24px"><div class="ei">⚙️</div><div class="et">Liste non configurée</div><div class="es">Renseignez l'ID de la liste PJAExaminer dans ⚙️ Paramètres</div></div>`;
+    return;
+  }
+  el.innerHTML=modHeader('📎 PJ à examiner','Chargement…')+`<div class="cp-loading" style="margin:24px">⏳ Chargement…</div>`;
+  try{
+    let url=`/sites/${cfg.sid}/lists/${cfg.pjid}/items?$expand=fields&$top=500`, items=[];
+    while(url){
+      const d=await gGet(url);
+      items=items.concat(d.value||[]);
+      url=d['@odata.nextLink']?d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
+    }
+    pjData=items.map(it=>({_spId:it.id,...(it.fields||{})}));
+    pjData.sort((a,b)=>String(b.DateTraitement||'').localeCompare(String(a.DateTraitement||'')));
+    rPJ();
+  }catch(e){
+    el.innerHTML=modHeader('📎 PJ à examiner','Erreur')
+      +`<div class="empty" style="margin:24px"><div class="ei">⚠️</div><div class="et">${esc(e.message)}</div><div class="es">Vérifiez l'ID de liste et vos droits</div></div>`;
+  }
+}
+function estExamine(p){ const v=p.Examine; return v===true||v==='true'||v==='Oui'||v===1||v==='1'; }
+
+function rPJ(){
+  const el=document.getElementById('vmod');
+  const types=[...new Set(pjData.map(p=>p.TypeDetecte||'—'))].sort();
+  const vus=pjData.filter(estExamine).length, reste=pjData.length-vus;
+  let liste=pjData;
+  if(pjFiltre==='__reste') liste=pjData.filter(p=>!estExamine(p));
+  else if(pjFiltre) liste=pjData.filter(p=>(p.TypeDetecte||'—')===pjFiltre);
+
+  el.innerHTML = modHeader('📎 PJ à examiner', `${pjData.length} pièce(s) — ${reste} restante(s) à examiner`)
+  + `<div class="sr">
+      ${statCard('gray',pjData.length,'Total')}
+      ${statCard('orange',reste,'À examiner')}
+      ${statCard('green',vus,'Examinées')}
+      ${statCard('blue',types.length,'Types détectés')}
+      ${statCard('red',pjData.filter(p=>String(p.TypeDetecte||'').startsWith('ERREUR')).length,'Erreurs extraction')}
+     </div>
+     <div class="tlb">
+       <button class="btn ${pjFiltre===''?'bpri':'bgho'} bsm" onclick="pjFiltre='';rPJ()">Toutes</button>
+       <button class="btn ${pjFiltre==='__reste'?'bpri':'bgho'} bsm" onclick="pjFiltre='__reste';rPJ()">⏳ Restantes (${reste})</button>
+       ${types.map(t=>`<button class="btn ${pjFiltre===t?'bpri':'bgho'} bsm" onclick="pjFiltre=${JSON.stringify(t).replace(/"/g,'&quot;')};rPJ()">${esc(t)} (${pjData.filter(p=>(p.TypeDetecte||'—')===t).length})</button>`).join('')}
+       <button class="btn bgho bsm" style="margin-left:auto" onclick="loadPJ()">↻ Rafraîchir</button>
+     </div>
+     <div style="padding:0 24px 24px">
+       ${!liste.length?`<div class="empty"><div class="ei">📭</div><div class="et">Aucune pièce</div></div>`:`
+       <div class="cptab-wrap"><table class="cptab">
+        <thead><tr><th style="width:80px">Examiné</th><th>Fichier</th><th>Type détecté</th><th>Fournisseur deviné</th><th>Raison du rejet</th><th>Date</th><th style="min-width:200px">Commentaire</th><th>Lien</th></tr></thead>
+        <tbody>${liste.map(p=>{
+          const i=pjData.indexOf(p), vu=estExamine(p);
+          return `<tr style="${vu?'opacity:.55':''}">
+            <td style="text-align:center">
+              <input type="checkbox" ${vu?'checked':''} onchange="togglePJ(${i},this.checked)" style="width:16px;height:16px;cursor:pointer">
+              ${vu&&p.ExaminePar?`<div style="font-size:9.5px;color:var(--g400);margin-top:2px" title="${esc(p.ExaminePar)} — ${esc(String(p.DateExamen||'').slice(0,10))}">${esc(String(p.ExaminePar).split(' ')[0])}</div>`:''}
+            </td>
+            <td class="mono" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.FileName||'')}">${esc(p.FileName||'—')}</td>
+            <td><span class="badge ${String(p.TypeDetecte||'').startsWith('ERREUR')?'bo2':'bgr2'}">${esc(p.TypeDetecte||'—')}</span></td>
+            <td style="font-size:12px">${esc(p.FournisseurDevine||'—')}</td>
+            <td style="font-size:11.5px;color:var(--g500);max-width:240px">${esc(p.RaisonRejet||'—')}</td>
+            <td style="font-size:11px;white-space:nowrap">${fd(p.DateTraitement)}</td>
+            <td><input class="cp-input" style="width:100%" value="${esc(p.CommentaireExamen||'')}" placeholder="note…" onchange="commentPJ(${i},this.value)"></td>
+            <td>${p.LienFichier?`<a href="${esc(p.LienFichier)}" target="_blank" class="btn bgho bsm">📄 Ouvrir</a>`:'—'}</td>
+          </tr>`;
+        }).join('')}</tbody></table></div>`}
+     </div>`;
+}
+async function togglePJ(i, val){
+  const p=pjData[i]; if(!p) return;
+  const avant=estExamine(p)?'Oui':'Non';
+  try{
+    await gWrite('PATCH', `/sites/${cfg.sid}/lists/${cfg.pjid}/items/${p._spId}/fields`,
+      { Examine: !!val, ExaminePar: val?moi():'', DateExamen: val?new Date().toISOString():null });
+    p.Examine=!!val; p.ExaminePar=val?moi():''; p.DateExamen=val?new Date().toISOString():'';
+    rPJ(); badges();
+    toast(val?'✅ Marquée examinée':'↩️ Remise à examiner','ok');
+    journaliser('PJ|'+(p.CleRejet||p.FileName||''), p.FileName||'', [
+      {cible:'PJ à examiner',champ:'Examine',avant,apres:val?'Oui':'Non',cleLigne:''}
+    ], 'Suivi d\'examen des pièces jointes');
+  }catch(e){ toast('⚠️ '+e.message,'err'); }
+}
+async function commentPJ(i, txt){
+  const p=pjData[i]; if(!p) return;
+  try{
+    await gWrite('PATCH', `/sites/${cfg.sid}/lists/${cfg.pjid}/items/${p._spId}/fields`, { CommentaireExamen: txt });
+    p.CommentaireExamen=txt;
+    toast('💬 Commentaire enregistré','ok');
+  }catch(e){ toast('⚠️ '+e.message,'err'); }
+}
+
+// ══ MODULE : ÉCARTS À REVOIR ══════════════════════════════════
+const ECARTS = {
+  ent: {t:'En-tête incohérent', d:'HT + TVA ≠ TTC — la lecture IA de l\'en-tête est fausse', g:'ko',
+        f:r=>{const ht=pa(r.TotalHT),tva=pa(r.TVA),ttc=pa(r.TotalTTC);
+              return ht&&ttc&&Math.abs(Math.round((ht+tva-ttc)*100)/100)>0.02;},
+        v:r=>fa(Math.round((pa(r.TotalHT)+pa(r.TVA)-pa(r.TotalTTC))*100)/100)+' €'},
+  lig: {t:'Écart lignes / en-tête', d:'Somme des lignes ≠ Total HT — contrôle interne, non bloquant', g:'wa',
+        f:r=>Math.abs(pa(r._Ecart_Total))>0.02, v:r=>fa(pa(r._Ecart_Total))+' €'},
+  age: {t:'Agence manquante', d:'Aucun établissement affecté — imputation analytique impossible', g:'ko',
+        f:r=>!r.EtablissementAffecte, v:()=>'—'},
+  sie: {t:'Déchets au Siège', d:'Flux déchets affecté au Siège — interdit par la règle d\'affectation', g:'ko',
+        f:r=>estDechets(r)&&r.EtablissementAffecte==='Siège', v:r=>esc(r.EtablissementAffecte)},
+  dbl: {t:'Doublon de numéro', d:'Même SIREN et même numéro normalisé sur plusieurs fiches', g:'ko',
+        f:r=>!!r.__dbl, v:r=>r.__dbl+' fiches'},
+  avo: {t:'Avoir orphelin', d:'Avoir sans pièce d\'origine exploitable', g:'wa',
+        f:r=>/avoir/i.test(r.Typededocument||'')&&!r.PieceOrigine, v:()=>'—'},
+  rev: {t:'Marquée à revoir', d:'Le traitement IA a levé un doute sur cette facture', g:'wa',
+        f:r=>r._A_Revoir===true||r._A_Revoir==='true', v:()=>'—'}
+};
+let ecFiltre='';
+
+function numNorm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^0+/,''); }
+function marquerDoublons(){
+  const g={};
+  rows.forEach(r=>{ delete r.__dbl;
+    const k=(String(r.SIRET||'').slice(0,9))+'|'+numNorm(r.NumeroFacture);
+    if(!numNorm(r.NumeroFacture)) return;
+    (g[k]=g[k]||[]).push(r);
+  });
+  Object.values(g).forEach(l=>{ if(l.length>1) l.forEach(r=>r.__dbl=l.length); });
+}
+
+function loadEcarts(){
+  marquerDoublons();
+  const el=document.getElementById('vmod');
+  const cles=Object.keys(ECARTS);
+  const parType={}; cles.forEach(k=>parType[k]=rows.filter(ECARTS[k].f));
+  const total=new Set(cles.flatMap(k=>parType[k].map(r=>r.CleUnique))).size;
+
+  let liste;
+  if(ecFiltre && parType[ecFiltre]) liste=parType[ecFiltre].map(r=>({r,k:ecFiltre}));
+  else liste=cles.flatMap(k=>parType[k].map(r=>({r,k})));
+  liste.sort((a,b)=>pa(b.r.TotalTTC)-pa(a.r.TotalTTC));
+
+  el.innerHTML = modHeader('🔍 Écarts à revoir', `${total} facture(s) concernée(s) — ${liste.length} anomalie(s)`)
+  + `<div class="sr" style="grid-template-columns:repeat(4,1fr)">
+      ${statCard('red', parType.ent.length+parType.age.length+parType.sie.length+parType.dbl.length,'Bloquants')}
+      ${statCard('orange', parType.lig.length+parType.avo.length+parType.rev.length,'Alertes')}
+      ${statCard('gray', total,'Factures touchées')}
+      ${statCard('green', fa(rows.filter(r=>cles.some(k=>ECARTS[k].f(r))).reduce((s,r)=>s+pa(r.TotalTTC),0))+' €','TTC concerné')}
+     </div>
+     <div class="tlb">
+       <button class="btn ${ecFiltre===''?'bpri':'bgho'} bsm" onclick="ecFiltre='';loadEcarts()">Tous</button>
+       ${cles.map(k=>`<button class="btn ${ecFiltre===k?'bpri':'bgho'} bsm" onclick="ecFiltre='${k}';loadEcarts()">${ECARTS[k].g==='ko'?'🔴':'⚠️'} ${esc(ECARTS[k].t)} (${parType[k].length})</button>`).join('')}
+       <button class="btn bgho bsm" style="margin-left:auto" onclick="loadData()">↻ Rafraîchir</button>
+     </div>
+     ${ecFiltre?`<div style="padding:0 24px 10px"><div class="cp-bandeau ${ECARTS[ecFiltre].g}"><span>${ECARTS[ecFiltre].g==='ko'?'🔴':'⚠️'}</span><span>${esc(ECARTS[ecFiltre].d)}</span></div></div>`:''}
+     <div style="padding:0 24px 24px">
+       ${!liste.length?`<div class="empty"><div class="ei">✅</div><div class="et">Aucun écart</div><div class="es">Rien à revoir sur ce périmètre</div></div>`:`
+       <div class="cptab-wrap"><table class="cptab">
+        <thead><tr><th>Anomalie</th><th>Fournisseur</th><th>N° facture</th><th>Date</th><th style="text-align:right">TTC</th><th>Agence</th><th style="text-align:right">Valeur</th><th>Statut</th></tr></thead>
+        <tbody>${liste.map(({r,k})=>`<tr onclick="openPanel('${esc(r.CleUnique||'')}')" style="cursor:pointer">
+          <td><span class="badge ${ECARTS[k].g==='ko'?'br2':'bo2'}">${ECARTS[k].g==='ko'?'🔴':'⚠️'} ${esc(ECARTS[k].t)}</span></td>
+          <td><strong>${esc(r.Fournisseur||'—')}</strong></td>
+          <td class="mono" style="font-size:11.5px">${esc(r.NumeroFacture||'—')}</td>
+          <td style="font-size:11.5px;white-space:nowrap">${fd(r.DateFacture)}</td>
+          <td class="mono" style="text-align:right">${fa(pa(r.TotalTTC))} €</td>
+          <td style="font-size:12px;${r.EtablissementAffecte?'':'color:var(--red);font-weight:600'}">${esc(r.EtablissementAffecte||'NON AFFECTÉE')}</td>
+          <td class="mono" style="text-align:right;font-weight:600">${ECARTS[k].v(r)}</td>
+          <td style="font-size:11.5px">${esc(r.Statut||'—')}</td>
+        </tr>`).join('')}</tbody></table></div>`}
+     </div>`;
+}
+
+// ── Fabriques de fragments partagés ───────────────────────────
+function modHeader(titre, sous){
+  return `<div class="ph"><div><div class="pt">${titre}</div><div class="pst">${esc(sous)}</div></div></div>`;
+}
+function statCard(col, val, lib){
+  return `<div class="sc2"><div class="sv2">${val}</div><div class="sl2"><span class="sd" style="background:var(--${col})"></span>${esc(lib)}</div></div>`;
+}
+
+// ── Motif courant de correction et libellés lisibles des champs ──
+let motifCourant='';
+const LIBELLE_CHAMP={
+  'Mati_x00e8_re':'Matière', 'Quantite':'Quantité', 'Unite':'Unité',
+  'PUHT':'PU HT', 'MontantHT':'Montant HT',
+  'CompteComptable':'Compte comptable', 'EtablissementAffecte':'Agence'
+};
+
+function voirBloquants(){
+  const f=curF; if(!f) return;
+  const b=controlesBloquants(f), a=controlesAlerte(f);
+  openMo(`
+    <div style="font-size:16px;font-weight:600;margin-bottom:4px">Contrôles de la facture</div>
+    <div style="font-size:12px;color:var(--g500);margin-bottom:14px">${esc(f.Fournisseur||'')} — ${esc(f.NumeroFacture||'')}</div>
+    ${b.length?`<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--red);margin-bottom:6px">🔴 Bloquants — l'approbation est refusée</div>
+      <ul style="margin:0 0 14px 18px;font-size:13px;line-height:1.9">${b.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    ${a.length?`<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--orange);margin-bottom:6px">⚠️ Alertes — n'empêchent pas l'approbation</div>
+      <ul style="margin:0 0 14px 18px;font-size:13px;line-height:1.9">${a.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    ${!b.length&&!a.length?`<div style="font-size:13px;color:var(--green)">✅ Aucun contrôle en défaut.</div>`:''}
+    <div style="font-size:11.5px;color:var(--g400);border-top:1px solid var(--g200);padding-top:10px;margin-top:6px">
+      Les contrôles de lignes (compte, agence) ne sont évalués que si l'onglet <strong>Infos Comptable</strong> a été ouvert au moins une fois pour cette facture.
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn bgho" onclick="closeMo()">Fermer</button>
+      <button class="btn bpri" onclick="closeMo();stab('tcompta');loadLignes()">🧾 Ouvrir les lignes</button>
+    </div>`);
 }
 
 // Réinitialiser les lignes quand on change de facture
 const _origClosePanel=closePanel;
 closePanel=function(){_origClosePanel();lignesLoaded=false;lignesCleUnique='';lignesData=[];document.getElementById('lcnt').textContent='—';};
-setInterval(()=>{if(account)loadData();},120000);
+// v19 : le rafraîchissement auto ne doit jamais écraser un travail en cours.
+setInterval(()=>{
+  if(!account) return;
+  const panneauOuvert = document.getElementById('dp')?.classList.contains('open');
+  const modifsEnCours = lignesData.some(l=>l._dirty);
+  if(panneauOuvert || modifsEnCours) return;
+  loadData();
+}, 300000);
 </script>
 </body>
 </html>
