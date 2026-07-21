@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v44)</title>
+<title>Tri'n'Collect — Validation Factures (v45)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -925,6 +925,14 @@ function pills(r){
   }).join('')}</div>`;
 }
 
+// v45 — badge compact Facture/Avoir pour les tableaux denses
+function typeBadge(t){
+  const v=String(t||'').toLowerCase();
+  if(!v) return '';
+  if(v.includes('avoir')) return '<span class="badge br2" style="font-size:9.5px">AVOIR</span>';
+  if(v.includes('facture')) return '<span class="badge bg2" style="font-size:9.5px">Facture</span>';
+  return `<span class="badge bgr2" style="font-size:9.5px">${esc(t)}</span>`;
+}
 function docTypeBadge(t){
   const m={'Facture':{c:'bg2',i:'Facture'},'Avoir':{c:'bb2',i:'Avoir'},'Bordereau de rachat':{c:'bp2',i:'Bordereau'}};
   const d=m[t]||{c:'bgr2',i:t||'—'};
@@ -2216,7 +2224,7 @@ function loadEcarts(){
         <tbody>${liste.map(({r,k})=>`<tr onclick="openPanel('${esc(r.CleUnique||'')}')" style="cursor:pointer">
           <td><span class="badge ${ECARTS[k].g==='ko'?'br2':'bo2'}">${ECARTS[k].g==='ko'?'🔴':'⚠️'} ${esc(ECARTS[k].t)}</span></td>
           <td><strong>${esc(r.Fournisseur||'—')}</strong></td>
-          <td class="mono" style="font-size:11.5px">${esc(r.NumeroFacture||'—')}</td>
+          <td class="mono" style="font-size:11.5px">${esc(r.NumeroFacture||'—')} ${typeBadge(r.Typededocument)}</td>
           <td style="font-size:11.5px;white-space:nowrap">${fd(r.DateFacture)}</td>
           <td class="mono" style="text-align:right">${fa(pa(r.TotalTTC))} €</td>
           <td style="font-size:12px;${r.EtablissementAffecte?'':'color:var(--red);font-weight:600'}">${esc(r.EtablissementAffecte||'NON AFFECTÉE')}</td>
@@ -2405,6 +2413,7 @@ function rattacherFournisseurs(acc){
     l.__fnom = f?f.Fournisseur:'—';
     l.__num  = f?f.NumeroFacture:'—';
     l.__date = f?f.DateFacture:'';
+    l.__type = f?f.Typededocument:'';   // v45 — Facture / Avoir sur les lignes
   });
   return acc;
 }
@@ -2583,7 +2592,7 @@ function corpsDoublonsFactures(fac){
       </tr></thead><tbody>
       ${g.map(r=>`<tr>
         <td class="mono" style="font-weight:600">${esc(r.NumeroFacture||'—')}</td>
-        <td style="font-size:11.5px">${esc(r.Typededocument||'—')}</td>
+        <td>${typeBadge(r.Typededocument)}</td>
         <td style="font-size:11.5px;white-space:nowrap">${fd(r.DateFacture)}</td>
         <td style="font-size:11.5px;white-space:nowrap;color:var(--g400)">${fd(r.DateTraitement)}</td>
         <td class="mono" style="text-align:right">${fa(pa(r.TotalHT))} €</td>
@@ -2645,11 +2654,12 @@ function corpsDoublonsLignes(lignesScope){
         ${g[0].NumBon?`<span style="font-weight:400;color:var(--g500)">bon ${esc(g[0].NumBon)}</span>`:''}
       </div>
       <table class="cptab"><thead><tr>
-        <th>N° facture</th><th>Date fact.</th><th>N° L.</th><th>Bon</th><th>Chantier</th>
+        <th>N° facture</th><th>Type</th><th>Date fact.</th><th>N° L.</th><th>Bon</th><th>Chantier</th>
         <th>Date rot.</th><th>Matière</th><th style="text-align:right">Qté</th><th style="text-align:right">Montant HT</th><th></th>
       </tr></thead><tbody>
       ${g.map(l=>`<tr>
         <td class="mono" style="font-size:11px;font-weight:600">${esc(l.__num)}</td>
+        <td>${typeBadge(l.__type)}</td>
         <td style="font-size:11px;white-space:nowrap">${fd(l.__date)}</td>
         <td class="mono" style="font-size:11px">${esc(l.NumeroLigne||'')}</td>
         <td class="mono" style="font-size:11px">${esc(l.NumBon||'—')}</td>
@@ -2951,7 +2961,7 @@ function corpsSage(R){
 
   if(sgOnglet==='sanssage'){
     const l=R.sansSage.sort((a,b)=>pa(b.TotalHT)-pa(a.TotalHT)).slice(0,400).map(f=>`<tr>
-      <td class="mono">${esc(f.NumeroFacture||'—')}</td>
+      <td class="mono">${esc(f.NumeroFacture||'—')} ${typeBadge(f.Typededocument)}</td>
       <td>${esc(f.Fournisseur||'—')}</td>
       <td style="font-size:11.5px;white-space:nowrap">${fd(f.DateFacture)}</td>
       <td class="mono" style="text-align:right">${fa(pa(f.TotalHT))} €</td>
@@ -3798,7 +3808,7 @@ function rImport(){
           return `<tr style="${c.ko.length?'background:var(--rbg)':''}">
             <td style="text-align:center"><input type="checkbox" ${impSel.has(c.f.CleUnique)?'checked':''} ${c.ko.length?'disabled':''}
                 onchange="impTog('${esc(c.f.CleUnique)}',this.checked)" style="width:15px;height:15px"></td>
-            <td class="mono" style="font-size:11.5px;font-weight:600">${esc(c.f.NumeroFacture||'—')}</td>
+            <td class="mono" style="font-size:11.5px;font-weight:600">${esc(c.f.NumeroFacture||'—')} ${typeBadge(c.f.Typededocument)}</td>
             <td style="font-size:11.5px">${esc(c.f.Fournisseur||'—')}</td>
             <td style="font-size:11px;white-space:nowrap">${fd(c.f.DateFacture)}</td>
             <td class="mono" style="text-align:right">${fa(pa(c.f.TotalHT))} €</td>
