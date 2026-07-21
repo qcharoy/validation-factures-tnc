@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v26)</title>
+<title>Tri'n'Collect — Validation Factures (v29)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -344,6 +344,8 @@ td.mono{font-family:var(--mono);font-size:12px}
     <div class="ni" onclick="setView('ec')" data-view="ec"><span class="nic">🔍</span>Écarts à revoir<span class="nb o" id="b-ec">0</span></div>
     <div class="ni" onclick="setView('pj')" data-view="pj"><span class="nic">📎</span>PJ à examiner<span class="nb o" id="b-pj">0</span></div>
     <div class="ni" onclick="setView('db')" data-view="db"><span class="nic">🧬</span>Doublons<span class="nb o" id="b-db">0</span></div>
+    <div class="ni" onclick="setView('sg')" data-view="sg"><span class="nic">🔗</span>Rapprochement Sage<span class="nb gr" id="b-sg">—</span></div>
+    <div class="ni" onclick="setView('rt')" data-view="rt"><span class="nic">🔄</span>Retraitement<span class="nb gr" id="b-rt">—</span></div>
   </div>
   <div class="sbd"></div>
   <div class="sbs">
@@ -466,11 +468,19 @@ td.mono{font-family:var(--mono);font-size:12px}
       <p class="hint">Sans cet ID, les corrections ne sont pas tracées (l'application fonctionne quand même)</p>
       <label>ID Liste PJAExaminer</label>
       <input id="cpjid" placeholder="dcbbe4c7-8089-448f-9e2d-fc858289d25d">
+      <label>ID Liste DecisionsDoublons</label>
+      <input id="cddid" placeholder="À créer — sinon les décisions restent locales">
     </div>
     <div class="csec">
       <div class="csect">🔗 n8n Webhook</div>
       <label>URL webhook validation</label>
       <input id="cwh" placeholder="https://tri-n-collect.app.n8n.cloud/webhook/Validation">
+      <label>URL webhook retraitement</label>
+      <input id="cwhr" placeholder="https://tri-n-collect.app.n8n.cloud/webhook/retraiter">
+      <label>URL du fichier Sage sur SharePoint</label>
+      <input id="csgurl" placeholder="https://trincollect.sharepoint.com/sites/PowerBI/Documents partages/Sage/sage-achats.json">
+      <p class="hint">Déposé chaque nuit par n8n. Copiez l'URL du fichier telle qu'affichée dans SharePoint.</p>
+      <p class="hint">Reçoit en POST la liste des factures à relire. Sans cette URL, le renvoi au worker est désactivé.</p>
     </div>
     <div class="cfga">
       <button class="btn bgho" onclick="closeConfig()">Annuler</button>
@@ -493,6 +503,9 @@ const cfg={
   get wh()   {return lgs('tnc_wh')  ||'https://tri-n-collect.app.n8n.cloud/webhook/Validation'},
   get jid()  {return lgs('tnc_jid') ||''},   // v20 — liste JournalCorrections
   get pjid() {return lgs('tnc_pjid')||'dcbbe4c7-8089-448f-9e2d-fc858289d25d'}, // v20 — PJAExaminer
+  get ddid() {return lgs('tnc_ddid')||''},   // v27 — liste DecisionsDoublons
+  get whr()  {return lgs('tnc_whr') ||''},   // v28 — webhook n8n de retraitement
+  get sgurl(){return lgs('tnc_sgurl')||''},  // v29 — fichier Sage déposé sur SharePoint
 };
 function lgs(k){try{return localStorage.getItem(k)||''}catch(e){return''}}
 function lss(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -507,6 +520,9 @@ function openConfig(){
   document.getElementById('cwh').value=cfg.wh;
   document.getElementById('cjid').value=cfg.jid;
   document.getElementById('cpjid').value=cfg.pjid;
+  document.getElementById('cddid').value=cfg.ddid;
+  document.getElementById('cwhr').value=cfg.whr;
+  document.getElementById('csgurl').value=cfg.sgurl;
   document.getElementById('cfgp').classList.add('open');
 }
 function closeConfig(){document.getElementById('cfgp').classList.remove('open')}
@@ -520,6 +536,9 @@ function saveConfig(){
   lss('tnc_wh', document.getElementById('cwh').value.trim());
   lss('tnc_jid', document.getElementById('cjid').value.trim());
   lss('tnc_pjid',document.getElementById('cpjid').value.trim());
+  lss('tnc_ddid',document.getElementById('cddid').value.trim());
+  lss('tnc_whr', document.getElementById('cwhr').value.trim());
+  lss('tnc_sgurl',document.getElementById('csgurl').value.trim());
   closeConfig(); initMsal(); toast('✅ Config enregistrée','ok');
 }
 
@@ -625,9 +644,11 @@ function setView(v){
   document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.view===v));
   const vl=document.getElementById('vlist'), vs=document.getElementById('vstat'), vm=document.getElementById('vmod');
   // v20 : trois familles de vues — liste de factures, module de contrôle, statistiques
-  if(v==='pj'||v==='ec'||v==='db'){
+  if(v==='pj'||v==='ec'||v==='db'||v==='sg'||v==='rt'){
     vl.style.display='none'; vs.style.display='none'; vm.style.display='flex';
-    if(v==='pj') loadPJ(); else if(v==='ec') loadEcarts(); else loadDoublons();
+    if(v==='pj') loadPJ(); else if(v==='ec') loadEcarts();
+    else if(v==='sg') loadSage(); else if(v==='rt') loadRetraitement();
+    else { chargerDecisions().then(rDoublons); loadDoublons(); }
     return;
   }
   vm.style.display='none';
@@ -656,6 +677,8 @@ function badges(){
     marquerDoublons();
     const nEc=rows.filter(r=>Object.keys(ECARTS).some(k=>ECARTS[k].f(r))).length;
     document.getElementById('b-ec').textContent=nEc;
+    document.getElementById('b-sg').textContent = sageData ? rapprocher().manquantes.length : '—';
+    document.getElementById('b-rt').textContent = lotsRetraitement.length || '—';
     const fac0=rows.filter(dansPeriode);
     document.getElementById('b-db').textContent =
       Object.keys(DBL_FACTURE).reduce((n,k)=>n+grouperPar(fac0,DBL_FACTURE[k].k).length,0);
@@ -1002,6 +1025,8 @@ function rAbar(f){
   if(canBlk)h+=`<button class="btn bdan" onclick="showBlk()">⊘ Bloquer</button>`;
   h+=`<button class="btn bpur" onclick="showTrf()">→ Transférer</button>`;
   if(canUnblk)h+=`<a href="${cfg.wh}?action=debloquer&facture=${cle}&niveau=1&email=${nm}&nom=${nm}&etablissement=${etab}" target="_blank" class="btn bwrn">🔓 Débloquer</a>`;
+  if(renvoyable(f))
+    h+=`<button class="btn bgho" title="Relire cette facture avec la consigne fournisseur à jour" onclick="relancerFactureCourante()">🔄 Renvoyer au worker</button>`;
   h+=`<button class="btn bgho" onclick="stab('tc')">💬 Commenter</button>`;
   document.getElementById('ab').innerHTML=h;
 }
@@ -2102,7 +2127,7 @@ function loadEcarts(){
      <div style="padding:0 24px 24px">
        ${!liste.length?`<div class="empty"><div class="ei">✅</div><div class="et">Aucun écart</div><div class="es">Rien à revoir sur ce périmètre</div></div>`:`
        <div class="cptab-wrap"><table class="cptab">
-        <thead><tr><th>Anomalie</th><th>Fournisseur</th><th>N° facture</th><th>Date</th><th style="text-align:right">TTC</th><th>Agence</th><th style="text-align:right">Valeur</th><th>Statut</th></tr></thead>
+        <thead><tr><th>Anomalie</th><th>Fournisseur</th><th>N° facture</th><th>Date</th><th style="text-align:right">TTC</th><th>Agence</th><th style="text-align:right">Valeur</th><th>Statut</th><th></th></tr></thead>
         <tbody>${liste.map(({r,k})=>`<tr onclick="openPanel('${esc(r.CleUnique||'')}')" style="cursor:pointer">
           <td><span class="badge ${ECARTS[k].g==='ko'?'br2':'bo2'}">${ECARTS[k].g==='ko'?'🔴':'⚠️'} ${esc(ECARTS[k].t)}</span></td>
           <td><strong>${esc(r.Fournisseur||'—')}</strong></td>
@@ -2112,6 +2137,8 @@ function loadEcarts(){
           <td style="font-size:12px;${r.EtablissementAffecte?'':'color:var(--red);font-weight:600'}">${esc(r.EtablissementAffecte||'NON AFFECTÉE')}</td>
           <td class="mono" style="text-align:right;font-weight:600">${ECARTS[k].v(r)}</td>
           <td style="font-size:11.5px">${esc(r.Statut||'—')}</td>
+          <td onclick="event.stopPropagation()"><button class="btn bgho bsm" title="Corriger la consigne puis relire toutes les factures de ce fournisseur"
+              onclick='retraiterDepuisEcarts(${JSON.stringify(r.Fournisseur||"(sans nom)")})'>🔄</button></td>
         </tr>`).join('')}</tbody></table></div>`}
      </div>`;
 }
@@ -2316,12 +2343,22 @@ function corpsDoublonsFactures(fac){
   return `<div style="font-size:12px;color:var(--g500);margin-bottom:8px">
       ${groupes.length} groupe(s) — exposition théorique si tous étaient de vrais doublons : <strong>${fa(expo)} €</strong>
     </div>`
-   + groupes.map((g,gi)=>`
-    <div style="margin-bottom:12px;border:1px solid ${regle.g==='ko'?'#fca5a5':'#fcd34d'};border-radius:8px;overflow:hidden">
-      <div style="padding:7px 12px;background:${regle.g==='ko'?'var(--rbg)':'var(--obg)'};font-size:12px;font-weight:600;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+   + groupes.map((g,gi)=>{
+    const cles=g.map(x=>x.CleUnique||'');
+    const dec=decisionsDbl[cleGroupe(cles)];
+    const traite=!!dec;
+    return `
+    <div style="margin-bottom:12px;border:1px solid ${traite?'#c7d0d9':(regle.g==='ko'?'#fca5a5':'#fcd34d')};border-radius:8px;overflow:hidden;${traite?'opacity:.62':''}">
+      <div style="padding:7px 12px;background:${traite?'var(--g50)':(regle.g==='ko'?'var(--rbg)':'var(--obg)')};font-size:12px;font-weight:600;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span>Groupe ${gi+1} — ${g.length} fiches</span>
         <span style="font-weight:400;color:var(--g500)">${esc(g[0].Fournisseur||'—')}</span>
-        ${dblCat==='ttc'?`<span style="margin-left:auto;font-weight:400;font-size:11px;color:var(--g500)">Numéros différents : fusion interdite, vérification manuelle</span>`:''}
+        ${dec?`<span class="badge bg2" title="${esc(dec.Commentaire||'')}">${esc(dec.Decision)} · ${esc(String(dec.Utilisateur||'').split(' ')[0])}</span>`:''}
+        <span style="margin-left:auto;display:flex;gap:6px">
+          ${dblCat==='ttc'?`<span style="font-weight:400;font-size:11px;color:var(--g500);align-self:center">Numéros différents : fusion interdite</span>`:''}
+          <button class="btn bgho bsm" onclick='deciderGroupe(${JSON.stringify(cles)},"Pas un doublon")'>✓ Pas un doublon</button>
+          <button class="btn bgho bsm" onclick='deciderGroupe(${JSON.stringify(cles)},"Traité")'>✔️ Traité</button>
+          ${dec?`<button class="btn bgho bsm" onclick='deciderGroupe(${JSON.stringify(cles)},"Rouvert")'>↺ Rouvrir</button>`:''}
+        </span>
       </div>
       <table class="cptab"><thead><tr>
         <th>N° facture</th><th>Type</th><th>Date facture</th><th>Date traitement</th>
@@ -2336,10 +2373,13 @@ function corpsDoublonsFactures(fac){
         <td class="mono" style="text-align:right;font-weight:600">${fa(pa(r.TotalTTC))} €</td>
         <td style="font-size:11.5px">${esc(r.EtablissementAffecte||'—')}</td>
         <td style="font-size:11.5px">${esc(r.Statut||'—')}</td>
-        <td><button class="btn bgho bsm" onclick="openPanel('${esc(r.CleUnique||'')}')">Ouvrir</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn bgho bsm" onclick="openPanel('${esc(r.CleUnique||'')}')">Ouvrir</button>
+          <button class="btn bdan bsm" title="Supprimer cette fiche et ses lignes" onclick="supprimerFacture('${esc(r.CleUnique||'')}')">🗑️</button>
+        </td>
       </tr>`).join('')}
       </tbody></table>
-    </div>`).join('');
+    </div>`}).join('');
 }
 
 function corpsDoublonsLignes(lignesScope){
@@ -2406,6 +2446,647 @@ function corpsDoublonsLignes(lignesScope){
       </tbody></table>
     </div>`).join('')
    + (groupes.length>120?`<div style="font-size:11.5px;color:var(--g400)">120 premiers groupes affichés sur ${groupes.length}.</div>`:'');
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v27 — RAPPROCHEMENT SAGE (import CSV) + ACTIONS SUR DOUBLONS
+// ═══════════════════════════════════════════════════════════════
+
+// ── Analyseur CSV tolérant (guillemets, virgule ou point-virgule) ──
+function parseCSV(txt){
+  txt = txt.replace(/^﻿/, '');
+  const nl = txt.indexOf('\n');
+  const tete = txt.slice(0, nl<0?txt.length:nl);
+  const sep = (tete.split(';').length > tete.split(',').length) ? ';' : ',';
+  const lignes=[]; let champ='', ligne=[], guil=false;
+  for(let i=0;i<txt.length;i++){
+    const c=txt[i];
+    if(guil){
+      if(c==='"'){ if(txt[i+1]==='"'){champ+='"';i++;} else guil=false; }
+      else champ+=c;
+    } else if(c==='"') guil=true;
+    else if(c===sep){ ligne.push(champ); champ=''; }
+    else if(c==='\n'){ ligne.push(champ); lignes.push(ligne); ligne=[]; champ=''; }
+    else if(c!=='\r') champ+=c;
+  }
+  if(champ||ligne.length){ ligne.push(champ); lignes.push(ligne); }
+  if(!lignes.length) return [];
+  const cols=lignes[0].map(c=>c.trim());
+  return lignes.slice(1).filter(l=>l.length>1).map(l=>{
+    const o={}; cols.forEach((c,i)=>o[c]=(l[i]??'').trim()); return o;
+  });
+}
+// Retrouve une colonne par mots-clés, quel que soit son libellé exact
+function col(o, ...cles){
+  const noms=Object.keys(o);
+  for(const cle of cles){
+    const n=noms.find(x=>x.toLowerCase().replace(/[^a-z]/g,'')===cle.toLowerCase().replace(/[^a-z]/g,''));
+    if(n) return n;
+  }
+  for(const cle of cles){
+    const n=noms.find(x=>x.toLowerCase().includes(cle.toLowerCase()));
+    if(n) return n;
+  }
+  return null;
+}
+function nombreFR(v){
+  if(v==null||v==='') return 0;
+  return parseFloat(String(v).replace(/\s/g,'').replace(/€/g,'').replace(',','.').replace(/[^0-9.\-]/g,''))||0;
+}
+
+let sageData=null, sageMeta=null, sgOnglet='manquantes';
+
+function loadSage(){
+  // v29 — si un fichier SharePoint est configuré, on le lit sans rien demander
+  if(!sageData && cfg.sgurl){ rSage(); chargerSageDepuisSharePoint(true); return; }
+  rSage();
+}
+
+function importerFichierSage(input){
+  const f=input.files && input.files[0];
+  if(!f) return;
+  const el=document.getElementById('sg-corps');
+  if(el) el.innerHTML=`<div class="cp-loading">⏳ Lecture de ${esc(f.name)}…</div>`;
+  const lect=new FileReader();
+  lect.onload=()=>{
+    try{
+      const j=normaliserSage(lect.result, f.name);
+      if(j){
+        sageData=j;
+        sageMeta={fichier:f.name, pieces:j.length, source:'manuel',
+                  periode:[(j.map(p=>p.date).filter(Boolean).sort()[0]||'?'),
+                           (j.map(p=>p.date).filter(Boolean).sort().slice(-1)[0]||'?')],
+                  horodatage:new Date().toLocaleString('fr-FR')};
+        toast(`✅ ${j.length} pièce(s) chargée(s)`,'ok'); rSage(); badges();
+      } else analyserSage(parseCSV(lect.result), f.name);
+    }
+    catch(e){ toast('⚠️ Lecture impossible : '+e.message,'err'); console.error(e); }
+  };
+  lect.readAsText(f, 'utf-8');
+}
+
+function analyserSage(brut, nomFichier){
+  if(!brut.length){ toast('⚠️ Fichier vide','err'); return; }
+  const e=brut[0];
+  const cRef=col(e,'ref_piece','refpiece','EC_RefPiece','piece','reference');
+  const cJou=col(e,'journal','JO_Num');
+  const cMon=col(e,'Montant_ligne','montantligne','Somme de EA_Montant','EA_Montant','Somme de debit','debit','EC_Montant');
+  const cTie=col(e,'IntituleTiers','tiers','intitule_tiers');
+  const cDat=col(e,'date_comptable','JM_Date','date');
+  const cSec=col(e,'section_analytique','CA_Num','section');
+  const cCpt=col(e,'compte_comptable','CG_Num','compte');
+  const cAux=col(e,'CT_Num','compte_aux','compteaux');
+
+  if(!cRef || !cMon){
+    toast("⚠️ Colonnes introuvables : il faut au minimum une référence de pièce et un montant",'err');
+    return;
+  }
+
+  // Achats uniquement — FAC = ventes
+  const ach = cJou ? brut.filter(r=>['AC1','ACC'].includes((r[cJou]||'').toUpperCase())) : brut;
+
+  const parRef={};
+  ach.forEach(r=>{
+    const ref=(r[cRef]||'').trim(); if(!ref) return;
+    const g = parRef[ref] || (parRef[ref] = {
+      ref, refNorm:numNorm(ref), tiers:r[cTie]||'', date:(r[cDat]||'').slice(0,10),
+      ht:0, nb:0, sections:new Set(), comptes:new Set(), aux:r[cAux]||''
+    });
+    g.ht += nombreFR(r[cMon]); g.nb++;
+    if(cSec && r[cSec]) g.sections.add(r[cSec]);
+    if(cCpt && r[cCpt]) g.comptes.add(r[cCpt]);
+    if(!g.tiers && cTie) g.tiers=r[cTie]||'';
+  });
+
+  sageData = Object.values(parRef).map(g=>({...g, ht:Math.round(g.ht*100)/100}));
+  sageMeta = {
+    fichier: nomFichier, lignes: brut.length, lignesAchat: ach.length,
+    pieces: sageData.length, colonnes:{cRef,cJou,cMon,cTie,cDat,cSec,cCpt},
+    periode: [ (sageData.map(g=>g.date).filter(Boolean).sort()[0]||'?'),
+               (sageData.map(g=>g.date).filter(Boolean).sort().slice(-1)[0]||'?') ],
+    horodatage: new Date().toLocaleString('fr-FR')
+  };
+  toast(`✅ ${sageData.length} pièce(s) d'achat chargée(s)`,'ok');
+  rSage();
+}
+
+// ── Rapprochement : Sage ↔ SharePoint ──────────────────────────
+// Le montant comparé est le TOTAL HT : l'export Power BI ne contient
+// que les lignes de charges, ni TVA ni ligne fournisseur. C'est aussi
+// la référence comptable retenue le 19/07.
+const SEUIL_ECART = 0.02;
+function rapprocher(){
+  const fac = rows.filter(dansPeriode);
+  const parNorm={};
+  fac.forEach(f=>{ const n=numNorm(f.NumeroFacture); if(n) (parNorm[n]=parNorm[n]||[]).push(f); });
+
+  const manquantes=[], ecarts=[], ok=[], ambigues=[];
+  sageData.forEach(g=>{
+    const cand = parNorm[g.refNorm] || [];
+    if(cand.length===0){ manquantes.push({sage:g}); return; }
+    if(cand.length>1){ ambigues.push({sage:g, candidats:cand}); return; }
+    const f=cand[0], ht=pa(f.TotalHT), d=Math.round((g.ht-ht)*100)/100;
+    (Math.abs(d)<=SEUIL_ECART ? ok : ecarts).push({sage:g, facture:f, ecart:d});
+  });
+  const rapprochees=new Set([...ok,...ecarts].map(x=>x.facture.CleUnique));
+  const sansSage = fac.filter(f=>!rapprochees.has(f.CleUnique));
+  return {manquantes, ecarts, ok, ambigues, sansSage, total:sageData.length};
+}
+
+function rSage(){
+  const el=document.getElementById('vmod');
+  if(!sageData){
+    el.innerHTML = modHeader('🔗 Rapprochement Sage','Aucun export chargé')
+    + `<div style="padding:0 24px 24px">
+        <div class="cp-bandeau wa" style="display:block">
+          <div style="font-weight:700;margin-bottom:6px">Comment obtenir le fichier</div>
+          <div style="margin-bottom:6px">Dans Power BI, ouvrez la table des écritures, <em>Exporter les données → .csv</em>.
+          Gardez au minimum les colonnes <strong>ref_piece</strong>, <strong>journal</strong>, <strong>Montant_ligne</strong>
+          (ou un montant équivalent), et si possible <strong>IntituleTiers</strong>, <strong>date_comptable</strong>,
+          <strong>compte_comptable</strong>, <strong>section_analytique</strong>.</div>
+          <div>Le fichier reste dans votre navigateur : il n'est envoyé nulle part et disparaît à la fermeture de l'onglet.</div>
+        </div>
+        <div class="empty" style="margin-top:14px">
+          <div class="ei">🔗</div><div class="et">Aucune donnée Sage chargée</div>
+          <div class="es">${cfg.sgurl
+            ? 'Un fichier est configuré sur SharePoint mais n\'a pas pu être lu. Vérifiez l\'URL dans ⚙️ Paramètres.'
+            : 'Configurez l\'URL du fichier déposé par n8n dans ⚙️ Paramètres, ou chargez un CSV manuellement.'}</div>
+          <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            ${cfg.sgurl?`<button class="btn bpri" onclick="chargerSageDepuisSharePoint()">🔗 Lire le fichier SharePoint</button>`:''}
+            <input type="file" id="sg-file" accept=".csv,.json,text/csv" style="display:none" onchange="importerFichierSage(this)">
+            <button class="btn bgho" onclick="document.getElementById('sg-file').click()">📂 Charger un fichier manuellement</button>
+          </div>
+        </div>
+       </div>`;
+    return;
+  }
+
+  const R=rapprocher(), m=sageMeta;
+  const tot=R.total||1;
+  const onglets=[
+    ['manquantes',`🔴 Absentes de n8n (${R.manquantes.length})`],
+    ['ecarts',    `⚠️ Écarts de montant (${R.ecarts.length})`],
+    ['ambigues',  `❓ Ambiguës (${R.ambigues.length})`],
+    ['sanssage',  `📄 Sans écriture Sage (${R.sansSage.length})`],
+    ['ok',        `✅ Rapprochées (${R.ok.length})`]
+  ];
+
+  el.innerHTML = modHeader('🔗 Rapprochement Sage',
+      `${m.fichier} · ${m.pieces} pièces d'achat · ${m.periode[0]} → ${m.periode[1]}`
+      + (m.majFichier?` · fichier du ${m.majFichier}`:'') )
+  + (m.majFichier?`<div style="padding:0 24px 8px">Fraîcheur des données Sage : ${fraicheurSage()}</div>`:'')
+  + `<div class="sr" style="grid-template-columns:repeat(5,1fr)">
+      ${statCard('green', Math.round(R.ok.length/tot*100)+' %','Taux de rapprochement')}
+      ${statCard('red',   R.manquantes.length,'Absentes de n8n')}
+      ${statCard('orange',R.ecarts.length,'Écarts de montant')}
+      ${statCard('blue',  R.sansSage.length,'Sans écriture Sage')}
+      ${statCard('gray',  fa(R.manquantes.reduce((s,x)=>s+x.sage.ht,0))+' €',"HT non lu par l'IA")}
+     </div>
+     <div class="tlb">
+       ${onglets.map(([k,l])=>`<button class="btn ${sgOnglet===k?'bpri':'bgho'} bsm" onclick="sgOnglet='${k}';rSage()">${l}</button>`).join('')}
+       <input type="file" id="sg-file" accept=".csv,.json,text/csv" style="display:none" onchange="importerFichierSage(this)">
+       <span style="margin-left:auto;display:flex;gap:6px">
+         ${cfg.sgurl?`<button class="btn bgho bsm" onclick="chargerSageDepuisSharePoint()">↻ Relire SharePoint</button>`:''}
+         <button class="btn bgho bsm" onclick="document.getElementById('sg-file').click()">📂 Fichier manuel</button>
+       </span>
+     </div>
+     <div style="padding:0 24px 24px" id="sg-corps">${corpsSage(R)}</div>`;
+}
+
+function corpsSage(R){
+  const T=(entetes,lignes,vide)=> lignes.length
+    ? `<div class="cptab-wrap"><table class="cptab"><thead><tr>${entetes.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${lignes.join('')}</tbody></table></div>`
+    : `<div class="empty"><div class="ei">✅</div><div class="et">${vide}</div></div>`;
+
+  if(sgOnglet==='manquantes'){
+    const l=R.manquantes.sort((a,b)=>b.sage.ht-a.sage.ht).slice(0,400).map(({sage:g})=>`<tr>
+      <td class="mono" style="font-weight:600">${esc(g.ref)}</td>
+      <td>${esc(g.tiers||'—')}</td>
+      <td style="font-size:11.5px;white-space:nowrap">${esc(g.date)}</td>
+      <td class="mono" style="text-align:right;font-weight:600">${fa(g.ht)} €</td>
+      <td style="text-align:center">${g.nb}</td>
+      <td style="font-size:11px">${esc([...g.sections].slice(0,3).join(', '))}</td>
+      <td style="font-size:11px;color:var(--g500)">${esc([...g.comptes].slice(0,3).join(', '))}</td>
+    </tr>`);
+    return `<div class="cp-bandeau ko"><span>🔴</span><span>Ces pièces sont comptabilisées dans Sage mais l'IA ne les a jamais lues.
+      À croiser avec <strong>PJ à examiner</strong> : le PDF a peut-être été rejeté.</span></div>`
+      + T(['Réf. pièce','Tiers','Date','HT Sage','Nb lignes','Sections','Comptes'], l, 'Aucune pièce orpheline');
+  }
+
+  if(sgOnglet==='ecarts'){
+    const l=R.ecarts.sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart)).map(({sage:g,facture:f,ecart})=>`<tr>
+      <td class="mono" style="font-weight:600">${esc(g.ref)}</td>
+      <td>${esc(f.Fournisseur||g.tiers||'—')}</td>
+      <td class="mono" style="text-align:right">${fa(pa(f.TotalHT))} €</td>
+      <td class="mono" style="text-align:right">${fa(g.ht)} €</td>
+      <td class="mono" style="text-align:right;font-weight:600;color:var(--red)">${fa(ecart)} €</td>
+      <td class="mono" style="text-align:right;color:var(--g500)">${pa(f.TotalHT)?((g.ht/pa(f.TotalHT)).toFixed(3)):'—'}</td>
+      <td><button class="btn bgho bsm" onclick="openPanel('${esc(f.CleUnique)}')">Ouvrir</button></td>
+    </tr>`);
+    return `<div class="cp-bandeau wa"><span>⚠️</span><span>Le HT lu par l'IA diffère du HT comptabilisé de plus de ${SEUIL_ECART.toFixed(2)} €.
+      Un <strong>ratio proche de 0,83</strong> signale une TVA non déductible sur véhicule, <strong>0,90</strong> une taxe de séjour :
+      ce sont des écarts attendus, pas des erreurs de lecture.</span></div>`
+      + T(['Réf. pièce','Fournisseur','HT n8n','HT Sage','Écart','Ratio',''], l, 'Aucun écart');
+  }
+
+  if(sgOnglet==='ambigues'){
+    const l=R.ambigues.map(({sage:g,candidats})=>`<tr>
+      <td class="mono" style="font-weight:600">${esc(g.ref)}</td>
+      <td>${esc(g.tiers||'—')}</td>
+      <td class="mono" style="text-align:right">${fa(g.ht)} €</td>
+      <td>${candidats.map(f=>`<button class="btn bgho bsm" style="margin:2px" onclick="openPanel('${esc(f.CleUnique)}')">${esc(f.NumeroFacture)} — ${fa(pa(f.TotalHT))} €</button>`).join('')}</td>
+    </tr>`);
+    return `<div class="cp-bandeau wa"><span>❓</span><span>Plusieurs factures portent le même numéro normalisé : le rapprochement automatique est refusé.
+      Traitez d'abord ces doublons dans la vue dédiée.</span></div>`
+      + T(['Réf. pièce','Tiers','HT Sage','Candidats en base'], l, 'Aucune ambiguïté');
+  }
+
+  if(sgOnglet==='sanssage'){
+    const l=R.sansSage.sort((a,b)=>pa(b.TotalHT)-pa(a.TotalHT)).slice(0,400).map(f=>`<tr>
+      <td class="mono">${esc(f.NumeroFacture||'—')}</td>
+      <td>${esc(f.Fournisseur||'—')}</td>
+      <td style="font-size:11.5px;white-space:nowrap">${fd(f.DateFacture)}</td>
+      <td class="mono" style="text-align:right">${fa(pa(f.TotalHT))} €</td>
+      <td style="font-size:11.5px">${esc(f.Statut||'—')}</td>
+      <td><button class="btn bgho bsm" onclick="openPanel('${esc(f.CleUnique)}')">Ouvrir</button></td>
+    </tr>`);
+    return `<div class="cp-bandeau wa"><span>📄</span><span>Lues par l'IA mais sans écriture Sage correspondante sur la période de l'export.
+      Normal si elles ne sont pas encore comptabilisées — <strong>c'est précisément la file d'attente de l'import</strong>.</span></div>`
+      + T(['N° facture','Fournisseur','Date','HT n8n','Statut',''], l, 'Toutes rapprochées');
+  }
+
+  const l=R.ok.slice(0,300).map(({sage:g,facture:f})=>`<tr>
+    <td class="mono">${esc(g.ref)}</td><td>${esc(f.Fournisseur||'—')}</td>
+    <td class="mono" style="text-align:right">${fa(pa(f.TotalHT))} €</td>
+    <td style="font-size:11px">${esc([...g.sections].slice(0,2).join(', '))}</td>
+    <td style="font-size:11.5px">${esc(f.EtablissementAffecte||'—')}</td>
+  </tr>`);
+  return T(['Réf. pièce','Fournisseur','HT','Section Sage','Agence n8n'], l, 'Aucune');
+}
+
+// ═══ DÉCISIONS SUR LES DOUBLONS ════════════════════════════════
+let decisionsDbl={};
+
+function cleGroupe(cles){ return [...cles].sort().join('+').slice(0,250); }
+
+async function chargerDecisions(){
+  decisionsDbl={};
+  if(!cfg.ddid) return;
+  try{
+    const d=await gGet(`/sites/${cfg.sid}/lists/${cfg.ddid}/items?$expand=fields&$top=999`);
+    (d.value||[]).forEach(it=>{ const f=it.fields||{}; if(f.Title) decisionsDbl[f.Title]={...f,_spId:it.id}; });
+  }catch(e){ console.warn('[doublons] liste des décisions illisible :', e.message); }
+}
+
+async function deciderGroupe(cles, decision){
+  const cle=cleGroupe(cles);
+  const motif=prompt(`Motif de la décision « ${decision} » :`, decisionsDbl[cle]?.Commentaire||'');
+  if(motif===null) return;
+  const enr={Title:cle, Decision:decision, Utilisateur:moi(),
+             DateDecision:new Date().toISOString(), Commentaire:motif};
+  if(!cfg.ddid){
+    decisionsDbl[cle]=enr;
+    toast('⚠️ Décision non partagée : liste DecisionsDoublons non configurée','err');
+    rDoublons(); return;
+  }
+  try{
+    const ex=decisionsDbl[cle];
+    if(ex&&ex._spId) await gWrite('PATCH', `/sites/${cfg.sid}/lists/${cfg.ddid}/items/${ex._spId}/fields`, enr);
+    else{ const r=await gWrite('POST', `/sites/${cfg.sid}/lists/${cfg.ddid}/items`, {fields:enr}); enr._spId=r.id; }
+    decisionsDbl[cle]=enr;
+    journaliser(cle,'',[{cible:'Groupe de doublons',champ:'Décision',avant:ex?.Decision||'',apres:decision,cleLigne:''}],motif);
+    toast('✅ Décision enregistrée','ok'); rDoublons();
+  }catch(e){ toast('⚠️ '+e.message,'err'); }
+}
+
+// Suppression d'une fiche facture ET de ses lignes.
+// Opération irréversible : double confirmation + journalisation avant action.
+async function supprimerFacture(cle){
+  const f=rows.find(r=>r.CleUnique===cle);
+  if(!f){ toast('Facture introuvable','err'); return; }
+  const saisie=prompt(
+    `SUPPRESSION DÉFINITIVE\n\n${f.Fournisseur} — ${f.NumeroFacture} — ${fa(pa(f.TotalTTC))} €\n`+
+    `La fiche et toutes ses lignes seront supprimées de SharePoint.\n\n`+
+    `Tapez SUPPRIMER pour confirmer :`);
+  if(saisie!=='SUPPRIMER'){ toast('Suppression annulée'); return; }
+  const motif=prompt('Motif de la suppression (journalisé) :','Doublon confirmé');
+  if(motif===null){ toast('Suppression annulée'); return; }
+
+  try{
+    // Journaliser AVANT : si la suppression réussit, la fiche n'existe plus
+    await journaliser(cle, f.NumeroFacture||'', [
+      {cible:'Facture', champ:'SUPPRESSION', avant:`${f.Fournisseur} ${f.NumeroFacture} ${fa(pa(f.TotalTTC))} €`, apres:'(supprimée)', cleLigne:''}
+    ], motif);
+
+    const filtre=encodeURIComponent(`fields/CleUnique eq '${cle.replace(/'/g,"''")}'`);
+    const d=await gGet(`/sites/${cfg.sid}/lists/${cfg.llid}/items?$select=id&$filter=${filtre}&$top=500`);
+    for(const it of (d.value||[]))
+      await gWrite('DELETE', `/sites/${cfg.sid}/lists/${cfg.llid}/items/${it.id}`, undefined);
+    const nbL=(d.value||[]).length;
+
+    await gWrite('DELETE', `/sites/${cfg.sid}/lists/${cfg.lid}/items/${f._id}`, undefined);
+    rows=rows.filter(r=>r.CleUnique!==cle);
+    lignesToutes=null;
+    toast(`🗑️ Fiche supprimée (${nbL} ligne(s))`,'ok');
+    badges(); rDoublons();
+  }catch(e){ toast('⚠️ Échec de la suppression : '+e.message,'err'); }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v28 — RENVOI AU WORKER APRÈS CORRECTION D'UNE CONSIGNE
+// ═══════════════════════════════════════════════════════════════
+// Le geste métier est : « j'ai corrigé la consigne d'un fournisseur,
+// je veux relire ses factures ». C'est donc un traitement PAR LOT et
+// PAR FOURNISSEUR — relancer une facture à la fois ne sert qu'aux cas
+// isolés. D'où deux chemins : un bouton unitaire dans le panneau, et
+// une vue de lot qui part du fournisseur.
+
+let lotsRetraitement = [];   // historique local des envois
+try{ lotsRetraitement = JSON.parse(lgs('tnc_lots')||'[]'); }catch(e){}
+
+function memoriserLots(){
+  try{ lss('tnc_lots', JSON.stringify(lotsRetraitement.slice(0,40))); }catch(e){}
+}
+
+// Une facture n'est renvoyable que si l'on sait où retrouver son PDF.
+function renvoyable(f){ return !!(f && String(f.LienFacture||'').trim()); }
+
+async function relancerWorker(cles, motif, contexte){
+  const factures = cles.map(c=>rows.find(r=>r.CleUnique===c)).filter(Boolean);
+  const ok = factures.filter(renvoyable);
+  if(!ok.length){ toast('⚠️ Aucune facture avec un lien PDF exploitable','err'); return false; }
+  if(!cfg.whr){ toast("⚠️ Webhook de retraitement non configuré (⚙️ Paramètres)",'err'); return false; }
+
+  const lot = {
+    id: 'RT-'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,''),
+    date: new Date().toLocaleString('fr-FR'),
+    utilisateur: moi(),
+    motif: motif||'',
+    contexte: contexte||'',
+    nb: ok.length,
+    fournisseurs: [...new Set(ok.map(f=>f.Fournisseur))],
+    factures: ok.map(f=>({
+      cleUnique: f.CleUnique, numeroFacture: f.NumeroFacture, fournisseur: f.Fournisseur,
+      siret: f.SIRET, lienFacture: f.LienFacture, totalHT: f.TotalHT, totalTTC: f.TotalTTC
+    })),
+    statut: 'Envoyé'
+  };
+
+  try{
+    const res = await fetch(cfg.whr, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(lot)
+    });
+    const txt = await res.text();
+    if(!res.ok) throw new Error('HTTP '+res.status+' — '+txt.slice(0,200));
+    lot.reponse = txt.slice(0,300);
+  }catch(e){
+    lot.statut='Échec'; lot.reponse=String(e.message).slice(0,300);
+    lotsRetraitement.unshift(lot); memoriserLots();
+    toast('⚠️ Envoi échoué : '+e.message,'err');
+    return false;
+  }
+
+  lotsRetraitement.unshift(lot); memoriserLots();
+  // Trace côté SharePoint : le journal des corrections sert aussi d'historique métier
+  journaliser(ok.length===1?ok[0].CleUnique:'LOT|'+lot.id, ok.length===1?ok[0].NumeroFacture:'',
+    ok.map(f=>({cible:'Facture',champ:'Renvoi au worker',avant:'',apres:lot.id,cleLigne:''})),
+    motif||'Relecture après correction de consigne');
+
+  toast(`🔄 ${ok.length} facture(s) renvoyée(s) — lot ${lot.id}`,'ok');
+  return true;
+}
+
+// Chemin unitaire, depuis le panneau de détail
+async function relancerFactureCourante(){
+  if(!curF) return;
+  if(!renvoyable(curF)){ toast('⚠️ Pas de lien PDF sur cette facture','err'); return; }
+  const motif=prompt(`Renvoyer « ${curF.NumeroFacture} » au worker.\n\nMotif (journalisé) :`,
+                     'Consigne fournisseur corrigée');
+  if(motif===null) return;
+  if(await relancerWorker([curF.CleUnique], motif, 'Unitaire')) rAbar(curF);
+}
+
+// ── Vue de lot ────────────────────────────────────────────────
+let rtFournisseur='', rtSel=new Set(), rtOnglet='lot';
+
+function loadRetraitement(){ rRetraitement(); }
+
+// Le fournisseur est proposé en tête de liste s'il a des anomalies :
+// c'est presque toujours celui dont on vient de corriger la consigne.
+function fournisseursAnomalies(){
+  const fac=rows.filter(dansPeriode);
+  const cpt={};
+  fac.forEach(r=>{
+    const n=Object.keys(ECARTS).filter(k=>ECARTS[k].f(r)).length;
+    if(!n) return;
+    const f=r.Fournisseur||'(sans nom)';
+    cpt[f]=(cpt[f]||0)+n;
+  });
+  return Object.entries(cpt).sort((a,b)=>b[1]-a[1]);
+}
+
+function facturesDuFournisseur(){
+  if(!rtFournisseur) return [];
+  return rows.filter(dansPeriode).filter(r=>(r.Fournisseur||'(sans nom)')===rtFournisseur)
+             .sort((a,b)=>String(b.DateFacture||'').localeCompare(String(a.DateFacture||'')));
+}
+
+function rRetraitement(){
+  const el=document.getElementById('vmod');
+  const anos=fournisseursAnomalies();
+
+  if(rtOnglet==='histo'){
+    el.innerHTML = modHeader('🔄 Retraitement','Historique des lots envoyés au worker')
+      + `<div class="tlb">
+          <button class="btn bgho bsm" onclick="rtOnglet='lot';rRetraitement()">← Préparer un lot</button>
+          <button class="btn bpri bsm">📜 Historique (${lotsRetraitement.length})</button>
+          <button class="btn bgho bsm" style="margin-left:auto" onclick="if(confirm('Vider l\\'historique local ?')){lotsRetraitement=[];memoriserLots();rRetraitement();}">Vider</button>
+         </div>
+        <div style="padding:0 24px 24px">
+          <div class="cp-bandeau wa"><span>ℹ️</span><span>Cet historique est stocké dans votre navigateur.
+            La trace partagée, elle, est écrite dans <strong>JournalCorrections</strong> à chaque envoi.</span></div>
+          ${!lotsRetraitement.length?`<div class="empty"><div class="ei">📭</div><div class="et">Aucun lot envoyé</div></div>`:`
+          <div class="cptab-wrap"><table class="cptab">
+            <thead><tr><th>Lot</th><th>Date</th><th>Par</th><th>Fournisseur(s)</th><th style="text-align:center">Nb</th><th>Motif</th><th>Statut</th></tr></thead>
+            <tbody>${lotsRetraitement.map(l=>`<tr>
+              <td class="mono" style="font-size:11px">${esc(l.id)}</td>
+              <td style="font-size:11.5px;white-space:nowrap">${esc(l.date)}</td>
+              <td style="font-size:11.5px">${esc(String(l.utilisateur||'').split(' ')[0])}</td>
+              <td style="font-size:11.5px">${esc((l.fournisseurs||[]).slice(0,2).join(', '))}${(l.fournisseurs||[]).length>2?' +'+(l.fournisseurs.length-2):''}</td>
+              <td style="text-align:center;font-weight:600">${l.nb}</td>
+              <td style="font-size:11.5px;color:var(--g500);max-width:240px">${esc(l.motif||'—')}</td>
+              <td><span class="badge ${l.statut==='Envoyé'?'bg2':'br2'}" title="${esc(l.reponse||'')}">${esc(l.statut)}</span></td>
+            </tr>`).join('')}</tbody></table></div>`}
+        </div>`;
+    return;
+  }
+
+  const fac=facturesDuFournisseur();
+  const sel=fac.filter(f=>rtSel.has(f.CleUnique));
+  const sansLien=fac.filter(f=>!renvoyable(f)).length;
+
+  el.innerHTML = modHeader('🔄 Retraitement',
+      rtFournisseur ? `${rtFournisseur} — ${fac.length} facture(s) sur la période`
+                    : 'Renvoyer des factures au worker après correction d\'une consigne')
+  + `<div class="tlb">
+      <button class="btn bpri bsm">📦 Préparer un lot</button>
+      <button class="btn bgho bsm" onclick="rtOnglet='histo';rRetraitement()">📜 Historique (${lotsRetraitement.length})</button>
+     </div>
+     <div class="tlb" style="padding-top:0">
+       <span class="flab">Fournisseur</span>
+       <select class="fs" style="min-width:340px" onchange="rtFournisseur=this.value;rtSel=new Set();rRetraitement()">
+         <option value="">— choisir un fournisseur —</option>
+         ${anos.length?`<optgroup label="Avec anomalies">${anos.map(([f,n])=>`<option value="${esc(f)}"${rtFournisseur===f?' selected':''}>${esc(f)} (${n} anomalie${n>1?'s':''})</option>`).join('')}</optgroup>`:''}
+         <optgroup label="Tous">${[...new Set(rows.map(r=>r.Fournisseur||'(sans nom)'))].sort()
+            .map(f=>`<option value="${esc(f)}"${rtFournisseur===f?' selected':''}>${esc(f)}</option>`).join('')}</optgroup>
+       </select>
+       ${rtFournisseur?`
+         <button class="btn bgho bsm" onclick="rtSelAnomalies()">⚠️ Sélectionner celles en anomalie</button>
+         <button class="btn bgho bsm" onclick="rtSel=new Set(facturesDuFournisseur().filter(renvoyable).map(f=>f.CleUnique));rRetraitement()">Tout</button>
+         <button class="btn bgho bsm" onclick="rtSel=new Set();rRetraitement()">Aucune</button>
+         <button class="btn bpri bsm" style="margin-left:auto" ${sel.length?'':'disabled'} onclick="envoyerLot()">🔄 Renvoyer au worker (${sel.length})</button>
+       `:''}
+     </div>
+     <div style="padding:0 24px 24px">
+       ${!rtFournisseur?`
+         <div class="cp-bandeau wa"><span>💡</span><span>Le déroulé type : vous corrigez une fiche dans la liste
+           <strong>ConsignesFournisseur</strong>, vous revenez ici, vous choisissez le fournisseur et vous renvoyez ses
+           factures. Le worker les relit avec la nouvelle consigne et met à jour les fiches existantes.</span></div>
+         <div class="empty"><div class="ei">🔄</div><div class="et">Choisissez un fournisseur</div>
+           <div class="es">Ceux qui ont des anomalies sont proposés en premier.</div></div>`
+       : !fac.length ? `<div class="empty"><div class="ei">📭</div><div class="et">Aucune facture sur la période</div>
+           <div class="es">Élargissez la période dans la vue « À valider ».</div></div>`
+       : `${sansLien?`<div class="cp-bandeau wa"><span>⚠️</span><span><strong>${sansLien}</strong> facture(s) sans lien PDF :
+             elles ne peuvent pas être relues et sont désactivées.</span></div>`:''}
+          <div style="font-size:11.5px;color:var(--g400);margin-bottom:6px">${sel.length} sélectionnée(s) sur ${fac.length}</div>
+          <div class="cptab-wrap"><table class="cptab">
+            <thead><tr><th style="width:36px"></th><th>N° facture</th><th>Date</th>
+              <th style="text-align:right">HT</th><th style="text-align:right">TTC</th>
+              <th>Agence</th><th>Statut</th><th>Anomalies</th><th>PDF</th></tr></thead>
+            <tbody>${fac.map(f=>{
+              const ano=Object.keys(ECARTS).filter(k=>ECARTS[k].f(f));
+              const dispo=renvoyable(f);
+              return `<tr style="${dispo?'':'opacity:.45'}">
+                <td style="text-align:center"><input type="checkbox" ${rtSel.has(f.CleUnique)?'checked':''} ${dispo?'':'disabled'}
+                    onchange="rtTog('${esc(f.CleUnique)}',this.checked)" style="width:15px;height:15px;cursor:${dispo?'pointer':'not-allowed'}"></td>
+                <td class="mono" style="font-size:11.5px">${esc(f.NumeroFacture||'—')}</td>
+                <td style="font-size:11.5px;white-space:nowrap">${fd(f.DateFacture)}</td>
+                <td class="mono" style="text-align:right">${fa(pa(f.TotalHT))} €</td>
+                <td class="mono" style="text-align:right">${fa(pa(f.TotalTTC))} €</td>
+                <td style="font-size:11.5px">${esc(f.EtablissementAffecte||'—')}</td>
+                <td style="font-size:11.5px">${esc(f.Statut||'—')}</td>
+                <td>${ano.length?ano.map(k=>`<span class="badge ${ECARTS[k].g==='ko'?'br2':'bo2'}" style="font-size:9.5px">${esc(ECARTS[k].t)}</span>`).join(' '):'<span style="color:var(--g300)">—</span>'}</td>
+                <td>${dispo?`<a href="${esc(f.LienFacture)}" target="_blank" class="btn bgho bsm">📄</a>`:'<span style="color:var(--red);font-size:11px">absent</span>'}</td>
+              </tr>`;}).join('')}</tbody></table></div>`}
+     </div>`;
+}
+
+function rtTog(cle,v){ v?rtSel.add(cle):rtSel.delete(cle); rRetraitement(); }
+function rtSelAnomalies(){
+  rtSel=new Set(facturesDuFournisseur().filter(f=>renvoyable(f)&&Object.keys(ECARTS).some(k=>ECARTS[k].f(f))).map(f=>f.CleUnique));
+  rRetraitement();
+}
+async function envoyerLot(){
+  const cles=[...rtSel];
+  if(!cles.length) return;
+  const motif=prompt(`Renvoyer ${cles.length} facture(s) de « ${rtFournisseur} » au worker.\n\nQu'avez-vous corrigé ? (journalisé)`,
+                     'Consigne fournisseur corrigée');
+  if(motif===null) return;
+  if(await relancerWorker(cles, motif, rtFournisseur)){ rtSel=new Set(); rtOnglet='histo'; rRetraitement(); }
+}
+
+// Raccourci depuis la vue Écarts : part du fournisseur de la ligne cliquée
+function retraiterDepuisEcarts(fournisseur){
+  rtFournisseur=fournisseur; rtOnglet='lot'; rtSel=new Set();
+  setView('rt'); rtSelAnomalies();
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  v29 — LECTURE AUTOMATIQUE DU FICHIER SAGE DÉPOSÉ SUR SHAREPOINT
+// ═══════════════════════════════════════════════════════════════
+// n8n interroge Power BI chaque nuit, agrège PAR PIÈCE et dépose un
+// JSON sur SharePoint. L'application le lit à l'ouverture de la vue.
+// L'agrégation côté serveur est ce qui rend la chose tenable : 30 000
+// lignes de 6 Mo deviennent 4 000 objets de 0,3 Mo.
+
+async function lireFichierSharePoint(url){
+  const tok=await getToken();
+  if(!tok) throw new Error('Non connecté');
+  const enc=btoa(unescape(encodeURIComponent(url))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+  const meta=await fetch(`https://graph.microsoft.com/v1.0/shares/u!${enc}/driveItem`,
+                         {headers:{Authorization:'Bearer '+tok}});
+  if(!meta.ok) throw new Error('Fichier introuvable (HTTP '+meta.status+')');
+  const info=await meta.json();
+  const res=await fetch(`https://graph.microsoft.com/v1.0/shares/u!${enc}/driveItem/content`,
+                        {headers:{Authorization:'Bearer '+tok}});
+  if(!res.ok) throw new Error('Téléchargement impossible (HTTP '+res.status+')');
+  return { texte: await res.text(), nom: info.name, modifie: info.lastModifiedDateTime, taille: info.size };
+}
+
+// Accepte le JSON pré-agrégé (rapide) comme le CSV brut (repli).
+function normaliserSage(texte, nom){
+  const t=texte.trim();
+  if(t.startsWith('[') || t.startsWith('{')){
+    const j=JSON.parse(t);
+    const arr=Array.isArray(j) ? j : (j.pieces||j.data||[]);
+    return arr.map(o=>({
+      ref:      String(o.ref ?? o.r ?? o.ref_piece ?? ''),
+      refNorm:  numNorm(o.refNorm ?? o.ref ?? o.r ?? o.ref_piece ?? ''),
+      tiers:    o.tiers ?? o.t ?? o.IntituleTiers ?? '',
+      date:     String(o.date ?? o.d ?? o.date_comptable ?? '').slice(0,10),
+      ht:       Math.round((Number(o.ht ?? o.h ?? 0))*100)/100,
+      nb:       Number(o.nb ?? o.n ?? 0),
+      aux:      o.aux ?? o.CT_Num ?? '',
+      sections: new Set(o.sections || o.s || []),
+      comptes:  new Set(o.comptes  || o.c || [])
+    })).filter(x=>x.ref);
+  }
+  return null;   // CSV : traité par analyserSage
+}
+
+async function chargerSageDepuisSharePoint(silencieux){
+  if(!cfg.sgurl){ if(!silencieux) toast('⚠️ Aucune URL de fichier Sage configurée','err'); return false; }
+  const el=document.getElementById('sg-corps');
+  if(el && !silencieux) el.innerHTML='<div class="cp-loading">⏳ Lecture du fichier Sage sur SharePoint…</div>';
+  try{
+    const f=await lireFichierSharePoint(cfg.sgurl);
+    const pieces=normaliserSage(f.texte, f.nom);
+    if(pieces){
+      sageData=pieces;
+      sageMeta={ fichier:f.nom+' (SharePoint)', pieces:pieces.length, source:'sharepoint',
+                 majFichier:new Date(f.modifie).toLocaleString('fr-FR'),
+                 periode:[ (pieces.map(p=>p.date).filter(Boolean).sort()[0]||'?'),
+                           (pieces.map(p=>p.date).filter(Boolean).sort().slice(-1)[0]||'?') ],
+                 horodatage:new Date().toLocaleString('fr-FR'),
+                 tailleKo:Math.round(f.taille/1024) };
+      if(!silencieux) toast(`✅ ${pieces.length} pièce(s) lues depuis SharePoint`,'ok');
+    } else {
+      analyserSage(parseCSV(f.texte), f.nom+' (SharePoint)');
+      if(sageMeta){ sageMeta.source='sharepoint'; sageMeta.majFichier=new Date(f.modifie).toLocaleString('fr-FR'); }
+    }
+    rSage(); badges();
+    return true;
+  }catch(e){
+    if(!silencieux) toast('⚠️ '+e.message,'err');
+    console.warn('[sage]',e.message);
+    if(el && !silencieux) rSage();
+    return false;
+  }
+}
+
+// Âge du fichier : un rapprochement sur des données de la semaine
+// dernière donne des faux positifs qu'on prendrait pour des anomalies.
+function fraicheurSage(){
+  if(!sageMeta || !sageMeta.majFichier) return '';
+  const d=new Date(sageMeta.majFichier.split(' ')[0].split('/').reverse().join('-'));
+  const j=Math.floor((Date.now()-d.getTime())/86400000);
+  if(isNaN(j)) return '';
+  if(j<=1) return `<span class="badge bg2">à jour</span>`;
+  if(j<=3) return `<span class="badge bo2">${j} jours</span>`;
+  return `<span class="badge br2">⚠️ ${j} jours — actualisez le dataflow</span>`;
 }
 
 // ── Motif courant de correction et libellés lisibles des champs ──
