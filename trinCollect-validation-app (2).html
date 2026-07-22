@@ -675,55 +675,42 @@ function vEC(){
    </tbody></table></div>
    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
      <h1 style="font-size:14px;margin:0">Dans Sage mais jamais lues par l'IA (${R.manquantes.length})</h1>
-     ${R.manquantes.length?`<button class="b" id="btnmb" onclick="chercherMailbox()">📬 Chercher dans la boîte compta</button>
-      <span style="font-size:11px;color:var(--g400)">retrouve les emails d'origine et les renvoie au worker</span>`:''}
+     ${R.manquantes.length?`<span style="font-size:11px;color:var(--g400)">📬 retrouve l'email d'origine dans la boîte compta et l'envoie au worker</span>`:''}
    </div>
-   <div class="twrap"><table><thead><tr><th>N° pièce</th><th>Tiers (CT_Num)</th><th>Intitulé tiers</th><th>Date</th><th class="dr">${libRef()}</th><th>Comptes Sage</th></tr></thead><tbody>
-    ${lm.map(x=>`<tr><td class="mono">${esc(x.g.r)}</td><td class="mono">${esc(x.g.aux||'—')}</td><td>${esc(x.g.tiers||'—')}</td>
+   <div class="twrap"><table><thead><tr><th>N° pièce</th><th>Tiers (CT_Num)</th><th>Intitulé tiers</th><th>Date</th><th class="dr">${libRef()}</th><th>Comptes Sage</th><th></th></tr></thead><tbody>
+    ${lm.map((x,i)=>`<tr><td class="mono">${esc(x.g.r)}</td><td class="mono">${esc(x.g.aux||'—')}</td><td>${esc(x.g.tiers||'—')}</td>
       <td>${fd(x.g.d)}</td><td class="dr">${fa(refSage(x.g))} €</td>
-      <td style="font-size:11px;color:var(--g400)">${esc((x.g.comptes||[]).slice(0,3).join(', '))}</td></tr>`).join('')
-     ||'<tr><td colspan="6" style="text-align:center;color:var(--g400);padding:18px">Tout est lu ✅</td></tr>'}
+      <td style="font-size:11px;color:var(--g400)">${esc((x.g.comptes||[]).slice(0,3).join(', '))}</td>
+      <td>${String(x.g.r).trim().length>=4?`<button class="b" id="mb-${i}" onclick="chercherUne(${i})">📬 Email</button>`
+          :'<span style="font-size:10px;color:var(--g400)" title="Trop de faux positifs dans la recherche">réf. trop courte</span>'}</td></tr>`).join('')
+     ||'<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:18px">Tout est lu ✅</td></tr>'}
    </tbody></table></div>`;}
-async function chercherMailbox(){
-  const R=rapprocher();
-  const pieces=R.manquantes.map(x=>({ref:x.g.r,tiers:x.g.tiers||'',aux:x.g.aux||'',
-    date:x.g.d||'',montant:refSage(x.g)})).filter(p=>String(p.ref).trim().length>=4);
-  const courtes=R.manquantes.length-pieces.length;
-  if(!pieces.length){toast('Aucune référence exploitable (toutes trop courtes)');return;}
-  if(pieces.length>60){toast('⛔ '+pieces.length+' pièces — resserrez la période (max 60 par recherche)');return;}
-  if(!confirm(`Chercher ${pieces.length} pièce(s) dans compta.fournisseurs@tri-n-collect.fr ?`+
-    (courtes?`\n(${courtes} réf. trop courtes écartées — trop de faux positifs)`:'')+
-    `\n\nChaque email retrouvé sera renvoyé au worker pour lecture IA.`))return;
-  const b=document.getElementById('btnmb');if(b){b.disabled=true;b.textContent='⏳ Envoi…';}
+async function chercherUne(i){
+  const x=rapprocher().manquantes[i];if(!x)return;
+  const ref=String(x.g.r||'').trim();
+  const b=document.getElementById('mb-'+i);
+  if(b){b.disabled=true;b.textContent='⏳ Recherche…';}
   try{const r=await fetch(cfg.whChercher,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({pieces,utilisateur:moi()})});
+      body:JSON.stringify({pieces:[{ref,tiers:x.g.tiers||'',aux:x.g.aux||'',date:x.g.d||'',montant:refSage(x.g)}],utilisateur:moi()})});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const d=await r.json().catch(()=>({}));
-    journaliser('LOT|'+(d.lotId||'MB'),'',[{cible:'Boîte compta',champ:'Recherche absentes',avant:'',apres:pieces.length+' pièce(s)'}],'Recherche emails des pièces non lues');
-    toast('📬 Recherche lancée ('+pieces.length+' pièces) — je surveille l\'arrivée des factures…',6000);
-    suivreMailbox(pieces.map(p=>numNorm(p.ref)));}
+    journaliser('PIECE|'+ref,'',[{cible:'Boîte compta',champ:'Recherche email',avant:'',apres:ref}],'Recherche email — pièce non lue par l\'IA');
+    toast('📬 Recherche de '+ref+' lancée dans la boîte compta — je vous tiens au courant…');
+    suivreUne(i,ref);}
   catch(e){toast('⛔ '+e.message+' — le workflow MAILBOX-ABSENTES est-il actif ?');
-    if(b){b.disabled=false;b.textContent='📬 Chercher dans la boîte compta';}}}
-async function suivreMailbox(refs){
-  if(window._mbEnCours)return;window._mbEnCours=true;
-  const b=document.getElementById('btnmb');
-  const t0=Date.now();let trouvees=0;
-  const compte=()=>refs.filter(r=>rows.some(f=>numNorm(f.NumeroFacture)===r)).length;
-  while(Date.now()-t0<15*60000){
-    await new Promise(r=>setTimeout(r,60000));
+    if(b){b.disabled=false;b.textContent='📬 Email';}}}
+async function suivreUne(i,ref){
+  const refN=numNorm(ref);const t0=Date.now();
+  while(Date.now()-t0<8*60000){
+    await new Promise(r=>setTimeout(r,30000));
     try{await chargerFactures();}catch(e){continue;}
-    const n=compte();
-    const bb=document.getElementById('btnmb');
-    if(bb){bb.disabled=true;bb.textContent='📬 '+n+'/'+refs.length+' retrouvée(s)… '+Math.round((Date.now()-t0)/60000)+' min';}
-    if(n>trouvees){trouvees=n;toast('📬 '+n+'/'+refs.length+' facture(s) retrouvée(s) et lue(s) par l\'IA');}
-    if(n>=refs.length)break;}
-  const n=compte();
-  toast(n>=refs.length?'✅ Boîte compta : les '+refs.length+' pièces ont été retrouvées et lues !'
-    :'📬 Terminé : '+n+'/'+refs.length+' retrouvée(s). Les '+(refs.length-n)+' restante(s) sont introuvables dans la boîte (détail : logs n8n MAILBOX-ABSENTES) — probablement reçues par courrier ou sur un autre canal.',9000);
-  rafraichirLignesFond();_rap=null;
-  const bb=document.getElementById('btnmb');
-  if(bb){bb.disabled=false;bb.textContent='📬 Chercher dans la boîte compta';}
-  window._mbEnCours=false;rendre();}
+    if(rows.some(f=>numNorm(f.NumeroFacture)===refN)){
+      toast('✅ '+ref+' — email retrouvé, facture lue par l\'IA');
+      rafraichirLignesFond();_rap=null;rendre();return;}
+    const b=document.getElementById('mb-'+i);
+    if(b)b.textContent='⏳ '+Math.max(1,Math.round((Date.now()-t0)/60000))+' min…';}
+  toast('📬 '+ref+' : rien après 8 min — email introuvable dans la boîte (ou lecture IA en échec, voir logs n8n). Reçue par courrier ou portail fournisseur ?',9000);
+  const b=document.getElementById('mb-'+i);
+  if(b){b.disabled=false;b.textContent='📬 Réessayer';}}
 function analyserEcartIdx(i){const R=rapprocher();
   const x=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart))[i];
   if(x)analyserIA(x.f.CleUnique,{g:x.g,ecart:x.ecart});}
