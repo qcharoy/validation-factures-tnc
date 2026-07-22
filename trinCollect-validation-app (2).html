@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri'n'Collect — Validation Factures (v45)</title>
+<title>Tri'n'Collect — Validation Factures (v46)</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -318,6 +318,7 @@ td.mono{font-family:var(--mono);font-size:12px}
   <div class="lm">♻️</div>
   <div class="lt">Tri'n'Collect <span>— Validation Factures</span></div>
   <div class="tr">
+    <span id="mode-pill" style="display:inline-flex;margin-right:6px"></span>
     <span id="syn"></span>
     <button id="rbtn" title="Actualiser" onclick="loadData()">↻</button>
     <span id="asts" class="nok" onclick="login()">Non connecté</span>
@@ -362,12 +363,9 @@ td.mono{font-family:var(--mono);font-size:12px}
   </div>
   <div class="sbd"></div>
   <div class="sbs">
-    <div class="sbl">Circuit de validation</div>
-    <div class="ni" onclick="setView('av')" data-view="av"><span class="nic">📋</span>À valider<span class="nb" id="b-av">0</span></div>
-    <div class="ni" onclick="setView('bl')" data-view="bl"><span class="nic">⊘</span>Bloquées<span class="nb o" id="b-bl">0</span></div>
-    <div class="ni" onclick="setView('aa')" data-view="aa"><span class="nic">⚠️</span>À affecter<span class="nb o" id="b-aa">0</span></div>
-    <div class="ni" onclick="setView('vd')" data-view="vd"><span class="nic">✅</span>Validées<span class="nb gr" id="b-vd">0</span></div>
-    <div class="ni" onclick="setView('tt')" data-view="tt"><span class="nic">📁</span>Toutes<span class="nb gr" id="b-tt">0</span></div>
+    <div class="sbl">Archives</div>
+    <div class="ni" onclick="setView('tt')" data-view="tt"><span class="nic">📁</span>Toutes les factures<span class="nb gr" id="b-tt">0</span></div>
+    <div class="ni" onclick="setView('av')" data-view="av"><span class="nic">📋</span>Circuit de validation<span class="nb gr" id="b-av">0</span></div>
   </div>
   <div id="cfgb"><button onclick="openConfig()">⚙️ Paramètres</button></div>
 </div>
@@ -520,13 +518,13 @@ const cfg={
   get llid() {return lgs('tnc_llid')||'185d9ee3-b6de-4a0d-b6e8-22056923e339'},
   get vid()  {return lgs('tnc_vid') ||''},
   get wh()   {return lgs('tnc_wh')  ||'https://tri-n-collect.app.n8n.cloud/webhook/Validation'},
-  get jid()  {return lgs('tnc_jid') ||''},   // v20 — liste JournalCorrections
+  get jid()  {return lgs('tnc_jid') ||'933d4d28-7425-477a-a91e-f4ef31b7d3d1'},   // v20 — JournalCorrections
   get pjid() {return lgs('tnc_pjid')||'dcbbe4c7-8089-448f-9e2d-fc858289d25d'}, // v20 — PJAExaminer
   get cid_cons(){return lgs('tnc_cons')||'15697088-2113-457c-a237-66e87cbbc0cd'}, // v39 — ConsignesFournisseur
-  get ddid() {return lgs('tnc_ddid')||''},   // v27 — liste DecisionsDoublons
-  get whr()  {return lgs('tnc_whr') ||''},   // v28 — webhook n8n de retraitement
+  get ddid() {return lgs('tnc_ddid')||'8565b254-07b6-427f-813d-8d2b9c2f5d55'},   // v27 — DecisionsDoublons
+  get whr()  {return lgs('tnc_whr') ||'https://tri-n-collect.app.n8n.cloud/webhook/retraiter'},   // v28
   get sgurl(){return lgs('tnc_sgurl')||''},  // v29 — fichier Sage déposé sur SharePoint
-  get whAnalyse(){return lgs('tnc_wha')||''},// v41 — webhook n8n d'analyse d'écart par l'IA
+  get whAnalyse(){return lgs('tnc_wha')||'https://tri-n-collect.app.n8n.cloud/webhook/analyser-ecart'},// v41
 };
 function lgs(k){try{return localStorage.getItem(k)||''}catch(e){return''}}
 function lss(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -592,6 +590,7 @@ async function gGet(path){
   return res.json();
 }
 function onAuth(){
+  majModePill();
   const n=account.name||account.username;
   document.getElementById('unm').textContent=n.split(' ')[0];
   document.getElementById('uav').textContent=n.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
@@ -696,11 +695,12 @@ function setView(v){
   }
 }
 function badges(){
-  document.getElementById('b-av').textContent=rows.filter(r=>['À valider','Approuvé N1','Approuvé N2','Approuvé N3','Approuvé N4'].includes(r.Statut)).length;
-  document.getElementById('b-bl').textContent=rows.filter(r=>r.Statut==='Bloqué').length;
-  document.getElementById('b-aa').textContent=rows.filter(r=>r.Statut==='À affecter').length;
-  document.getElementById('b-vd').textContent=rows.filter(r=>r.Statut==='Validé - En attente comptabilité').length;
-  document.getElementById('b-tt').textContent=rows.length;
+  const st=(id,v)=>{const e=document.getElementById(id); if(e) e.textContent=v;};
+  st('b-av',rows.filter(r=>['À valider','Approuvé N1','Approuvé N2','Approuvé N3','Approuvé N4'].includes(r.Statut)).length);
+  st('b-bl',rows.filter(r=>r.Statut==='Bloqué').length);
+  st('b-aa',rows.filter(r=>r.Statut==='À affecter').length);
+  st('b-vd',rows.filter(r=>r.Statut==='Validé - En attente comptabilité').length);
+  st('b-tt',rows.length);
   // v20 — compteurs des modules de contrôle
   try{
     marquerDoublons();
@@ -718,8 +718,8 @@ function badges(){
       if(eco && consData) eco.textContent=consData.filter(c=>c.actif).length;
     }
     const fac0=rows.filter(dansPeriode);
-    document.getElementById('b-db').textContent =
-      Object.keys(DBL_FACTURE).reduce((n,k)=>n+grouperPar(fac0,DBL_FACTURE[k].k).length,0);
+    const edb=document.getElementById('b-db');
+    if(edb) edb.textContent = grouperPar(fac0,DBL_FACTURE.num.k).length;
     const nPj=pjData.length?pjData.filter(p=>(p.__c||classerPJ(p)).cat==='compta'&&!estExamine(p)).length:'—';
     document.getElementById('b-pj').textContent=nPj;
   }catch(e){ /* modules pas encore chargés */ }
@@ -2324,6 +2324,9 @@ const DBL_LIGNE = {
 };
 
 let lignesToutes=null, dblEnCours=false, dblCat='num', dblScope='periode';
+// v46 — décision DAF : seuls les doublons de NUMÉRO comptent au quotidien.
+// Les autres contrôles restent accessibles derrière « contrôles avancés ».
+let dblAvance=false;
 
 // ══ v37 — CACHE LOCAL DES LIGNES COMPTABLES ════════════════════
 // L'API Graph plafonne à 999 éléments par requête : quelques dizaines
@@ -2528,13 +2531,16 @@ function rDoublons(){
          <option value="tout"${dblScope==='tout'?' selected':''}>Tout l'historique</option>
        </select>
        <span class="fsep"></span>
-       ${Object.keys(DBL_FACTURE).map(k=>`<button class="btn ${dblCat===k?'bpri':'bgho'} bsm" onclick="dblCat='${k}';rDoublons()">${DBL_FACTURE[k].g==='ko'?'🔴':'⚠️'} ${esc(DBL_FACTURE[k].t)} (${nFac[k]})</button>`).join('')}
+       <button class="btn ${dblCat==='num'?'bpri':'bgho'} bsm" onclick="dblCat='num';rDoublons()">🔴 Numéro identique (${nFac.num})</button>
+       <button class="btn bgho bsm" onclick="dblAvance=!dblAvance;rDoublons()">${dblAvance?'▲ Masquer':'▼ Contrôles avancés'}</button>
      </div>
-     <div class="tlb" style="padding-top:0">
+     ${dblAvance?`<div class="tlb" style="padding-top:0">
+       ${Object.keys(DBL_FACTURE).filter(k=>k!=='num').map(k=>`<button class="btn ${dblCat===k?'bpri':'bgho'} bsm" onclick="dblCat='${k}';rDoublons()">${DBL_FACTURE[k].g==='ko'?'🔴':'⚠️'} ${esc(DBL_FACTURE[k].t)} (${nFac[k]})</button>`).join('')}
+       <span class="fsep"></span>
        <span class="flab">Lignes</span>
        ${Object.keys(DBL_LIGNE).map(k=>`<button class="btn ${dblCat===k?'bpri':'bgho'} bsm" onclick="dblCat='${k}';(lignesToutes?rDoublons():chargerToutesLignes())">${DBL_LIGNE[k].g==='ko'?'🔴':'⚠️'} ${esc(DBL_LIGNE[k].t)}${lignesToutes?` (${nLig[k]})`:''}</button>`).join('')}
-       ${lignesToutes?`<button class="btn bgho bsm" onclick="lignesToutes=null;chargerToutesLignes()">↻ Recharger les lignes</button>`:''}
-     </div>
+       ${lignesToutes?`<button class="btn bgho bsm" onclick="lignesToutes=null;chargerToutesLignes()">↻ Recharger</button>`:''}
+     </div>`:''}
      <div style="padding:0 24px 10px">
        <div class="cp-bandeau ${(DBL_FACTURE[dblCat]||DBL_LIGNE[dblCat]).g==='ko'?'ko':'wa'}">
          <span>${(DBL_FACTURE[dblCat]||DBL_LIGNE[dblCat]).g==='ko'?'🔴':'⚠️'}</span>
@@ -2812,10 +2818,8 @@ const SEUIL_ECART = 0.02;
 // facture mal lue deviendrait « absente » au lieu d'« en écart ». D'où
 // la P2, sans laquelle on perdrait exactement ce qu'on veut mesurer.
 const TTC_TOL = 0.02;
-function ttcSage(g){
-  // Le 401 (ttc) est la référence ; à défaut, repli sur la somme des charges.
-  return g.ttc!=null ? Math.abs(g.ttc) : Math.abs(Number(g.ht)||0);
-}
+// v46 — la référence Sage dépend du mode (test 401 / cible 488).
+function ttcSage(g){ const r=refSage(g); return r!=null ? r : Math.abs(Number(g.ht)||0); }
 function rapprocher(){
   const fac = rows.filter(dansPeriode);
   const parNorm={};
@@ -2827,14 +2831,15 @@ function rapprocher(){
     if(cand.length===0){ manquantes.push({sage:g}); return; }
     const mSage = ttcSage(g);
 
-    // P1 : parmi les candidats du même numéro, celui dont le TTC colle.
-    const p1 = cand.filter(f=>Math.abs(Math.abs(pa(f.TotalTTC))-mSage)<=TTC_TOL);
+    // P1 : parmi les candidats du même numéro, celui dont le montant colle
+    // (TTC en mode test, Σ HT en mode cible).
+    const p1 = cand.filter(f=>Math.abs(refIA(f)-mSage)<=TTC_TOL);
     if(p1.length===1){ ok.push({sage:g, facture:p1[0], ecart:0, passe:'P1'}); return; }
     if(p1.length>1){ ambigues.push({sage:g, candidats:p1, raison:'même numéro ET même TTC'}); return; }
 
     // P2 : un seul candidat au numéro, mais TTC différent → écart signalé.
     if(cand.length===1){
-      const f=cand[0], d=Math.round((mSage-Math.abs(pa(f.TotalTTC)))*100)/100;
+      const f=cand[0], d=Math.round((mSage-refIA(f))*100)/100;
       ecarts.push({sage:g, facture:f, ecart:d, passe:'P2'}); return;
     }
     // Plusieurs candidats, aucun au bon TTC : on ne devine pas.
@@ -3535,9 +3540,21 @@ function sageParNorm(){
   (sageData||[]).forEach(g=>{ if(g.refNorm) m[g.refNorm]=g; });
   return m;
 }
-function controlesImport(f, lignes){
+function controlesImport(f, lignes, g){
   const ko=[];
   if(!lignes.length) ko.push('aucune ligne comptable chargée');
+  // v46 — contrôles demandés par la DAF (22/07)
+  if(!String(f.DateEcheance||'').trim()) ko.push('date d\'échéance absente');
+  if(g && g.date && f.DateFacture){
+    const mSage=String(g.date).slice(0,7), mIA=String(f.DateFacture).slice(0,7);
+    if(mSage && mIA && mSage!==mIA) ko.push(`date hors du mois comptable (IA ${mIA} vs Sage ${mSage})`);
+  }
+  if(g && modeApp==='cible' && g.a!=null){
+    // La somme des charges IA doit égaler le 488600 HT au centime.
+    const somme0=Math.round(lignes.reduce((x,l)=>x+pa(l.MontantHT),0)*100)/100;
+    if(Math.abs(somme0-Math.abs(g.a))>0.02)
+      ko.push(`Σ charges ${fa(somme0)} € ≠ 488600 ${fa(Math.abs(g.a))} € — Sage refusera`);
+  }
   const sansCpt=lignes.filter(l=>!String(l.CompteComptable||'').trim()).length;
   const sansAg =lignes.filter(l=>!String(l.EtablissementAffecte||'').trim()).length;
   const sansSec=lignes.filter(l=>l.EtablissementAffecte && !sectionDe(l.EtablissementAffecte)).length;
@@ -3552,6 +3569,7 @@ function controlesImport(f, lignes){
 }
 
 let impSel=new Set(), impOnglet='lot', impCandidats=null, impEnCours=false;
+let impFourn=new Set();   // v46 — déploiement fournisseur par fournisseur
 
 async function loadImport(){ rImport(); if(!impCandidats && sageData && lignesToutes) construireCandidats(); }
 
@@ -3565,14 +3583,23 @@ async function construireCandidats(){
   impCandidats = rows.filter(dansPeriode).map(f=>{
     const g = idx[numNorm(f.NumeroFacture)];
     const lignes = (parCle[f.CleUnique]||[]).slice().sort((a,b)=>(a.NumeroLigne||0)-(b.NumeroLigne||0));
-    const c = controlesImport(f, lignes);
+    const c = controlesImport(f, lignes, g);
     return { f, sage:g||null, lignes, ko:c.ko, somme:c.somme,
              attente: g ? g.a : null,
+             exclu: !!exclusionsImport[f.CleUnique],
              deja: /Exporté lot/i.test(String(f.Statut||'')) };
-  }).filter(x=>x.sage && (x.attente===null || x.attente>0.005) && !x.deja);
+  }).filter(x=>{
+    if(!x.sage || x.deja) return false;
+    // Mode cible : seules les pièces au 488 encore débiteur sont à imputer.
+    // Mode test : toute facture rapprochée d'une pièce Sage est simulable.
+    if(modeApp==='cible') return x.attente!=null && x.attente>0.005;
+    return true;
+  });
 
   impCandidats.sort((a,b)=>a.ko.length-b.ko.length || pa(b.f.TotalHT)-pa(a.f.TotalHT));
-  impSel=new Set(impCandidats.filter(x=>!x.ko.length).map(x=>x.f.CleUnique));
+  // v46 — plus de présélection automatique : le déploiement se fait
+  // fournisseur par fournisseur, la sélection est un geste volontaire.
+  impSel=new Set();
   impEnCours=false; rImport();
 }
 
@@ -3583,8 +3610,13 @@ function ecrituresPour(cand){
   const num   = String(f.NumeroFacture||'').slice(0,30);
   const four  = String(f.Fournisseur||'').slice(0,40);
   const r2=v=>Math.round(v*100)/100;
+  // v46 — le compte tiers (CT_Num de l'écriture Sage) entre dans l'import :
+  // c'est lui qui sécurise la réconciliation du 488600 quand deux
+  // fournisseurs partagent une même référence de pièce.
+  const tiers = (cand.sage && cand.sage.aux) ? String(cand.sage.aux).trim() : '';
   const L = (cpt,lib,deb,cre,typ,sec)=>out.push({
-    journal: impCfg.journal, date: dateC, numFacture: num, compte: cpt, tiers: '',
+    journal: impCfg.journal, date: dateC, numFacture: num, compte: cpt,
+    tiers: typ==='G' ? tiers : '',
     libelle: lib.slice(0,60), structure: typ==='A'?impCfg.structure:'', section: sec||'',
     debit: r2(deb), credit: r2(cre), type: typ
   });
@@ -3658,6 +3690,19 @@ function genererImport(){
     e.structure, e.section,
     e.debit.toFixed(2).replace('.',','), e.credit.toFixed(2).replace('.',','), e.type
   ])));
+
+  // v46 — récap de bouclage AVANT le téléchargement : Sage bloque au
+  // moindre 0,01 €, autant le voir ici.
+  const refT=cands.reduce((x,c)=>x+(refSage(c.sage)||0),0);
+  const okRecap=confirm(
+    `RÉCAPITULATIF DU LOT\n\n`+
+    `${cands.length} facture(s) — mode ${modeApp==='cible'?'CIBLE (488600 HT)':'TEST (401 TTC)'}\n`+
+    `Total import (débits) : ${fa(t.debit)} €\n`+
+    `Total ${libModeRef()} analysé : ${fa(refT)} €\n`+
+    `Écart : ${fa(t.debit-refT)} €\n\n`+
+    (Math.abs(t.debit-refT)<0.005 ? 'Bouclage exact. Générer le fichier ?' :
+     '⚠️ ÉCART NON NUL — Sage refusera probablement. Générer quand même ?'));
+  if(!okRecap){ toast('Génération annulée'); return; }
 
   const lot='IMP-'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
   const csv=[IMP_COLONNES.join(';'), ...lignes.map(r=>r.map(v=>{
@@ -3748,21 +3793,36 @@ function rImport(){
     return;
   }
 
-  const sel=impCandidats.filter(c=>impSel.has(c.f.CleUnique));
+  // v46 — filtre fournisseur (vide = tous) et exclusions à part
+  const exclus=impCandidats.filter(c=>c.exclu);
+  const visibles=impCandidats.filter(c=>!c.exclu && (!impFourn.size || impFourn.has(c.f.Fournisseur||'(sans nom)')));
+  const sel=visibles.filter(c=>impSel.has(c.f.CleUnique));
   const t=totauxLot(sel);
-  const prets=impCandidats.filter(c=>!c.ko.length).length;
+  const prets=visibles.filter(c=>!c.ko.length).length;
+  const refTot=sel.reduce((x,c)=>x+(refSage(c.sage)||0),0);
+  const fournisseurs=[...new Set(impCandidats.filter(c=>!c.exclu).map(c=>c.f.Fournisseur||'(sans nom)'))].sort();
   const equilibre=Math.abs(t.ecart)<0.005;
   const selKo=sel.filter(c=>c.ko.length).length;
 
   el.innerHTML = modHeader('📤 Import Sage',
-      `${impCandidats.length} facture(s) en attente d'imputation analytique · ${prets} prête(s)`)
+      `Mode ${modeApp==='cible'?'🎯 CIBLE — imputation du 488600 (HT)':'🧪 TEST — simulation sur le 401 (TTC)'} · ${visibles.length} facture(s) · ${prets} prête(s)${exclus.length?` · ${exclus.length} exclue(s)`:''}`)
   + barrePeriode()
+  + `<div class="tlb" style="padding-bottom:4px">
+      <span class="flab">Fournisseur</span>
+      <select class="fs" style="min-width:280px" onchange="if(this.value){impFourn.add(this.value);impSel=new Set();rImport();this.value='';}">
+        <option value="">— ajouter un fournisseur au lot —</option>
+        ${fournisseurs.filter(f=>!impFourn.has(f)).map(f=>`<option>${esc(f)}</option>`).join('')}
+      </select>
+      ${[...impFourn].map(f=>`<span class="badge bb2" style="cursor:pointer" title="Retirer" onclick="impFourn.delete(${JSON.stringify(f).replace(/"/g,'&quot;')});impSel=new Set();rImport()">${esc(f)} ✕</span>`).join('')}
+      ${impFourn.size?`<button class="btn bgho bsm" onclick="impFourn=new Set();impSel=new Set();rImport()">Tous les fournisseurs</button>`:'<span style="font-size:11.5px;color:var(--g400)">aucun filtre = tous</span>'}
+      <button class="btn bgho bsm" style="margin-left:auto" onclick="impOnglet=impOnglet==='excl'?'lot':'excl';rImport()">${impOnglet==='excl'?'← Retour au lot':'🚫 Exclues ('+exclus.length+')'}</button>
+     </div>`
   + `<div class="sr" style="grid-template-columns:repeat(5,1fr)">
       ${statCard('green', sel.length,'Sélectionnées')}
       ${statCard('blue',  t.nbG+t.nbA,'Lignes à générer')}
-      ${statCard('gray',  fa(t.debit)+' €','Total débit')}
-      ${statCard('gray',  fa(t.credit)+' €','Total crédit')}
-      ${statCard(equilibre?'green':'red', fa(t.ecart)+' €','Écart')}
+      ${statCard('gray',  fa(t.debit)+' €','Total import (débits)')}
+      ${statCard('gray',  fa(refTot)+' €','Total '+libModeRef()+' analysé')}
+      ${statCard(Math.abs(t.debit-refTot)<0.005&&equilibre?'green':'red', fa(t.debit-refTot)+' €','Écart import vs Sage')}
      </div>
      <div class="tlb">
        <span class="flab">Journal</span>
@@ -3780,7 +3840,7 @@ function rImport(){
        <button class="btn bgho bsm" onclick="impCandidats=null;construireCandidats()">↻ Réanalyser</button>
      </div>
      <div class="tlb" style="padding-top:0">
-       <button class="btn bgho bsm" onclick="impSel=new Set(impCandidats.filter(c=>!c.ko.length).map(c=>c.f.CleUnique));rImport()">Tout ce qui est prêt</button>
+       <button class="btn bgho bsm" onclick="impSel=new Set(impCandidats.filter(c=>!c.exclu&&!c.ko.length&&(!impFourn.size||impFourn.has(c.f.Fournisseur||'(sans nom)'))).map(c=>c.f.CleUnique));rImport()">Tout ce qui est prêt</button>
        <button class="btn bgho bsm" onclick="impSel=new Set();rImport()">Aucune</button>
        <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
          ${selKo?`<span style="color:var(--red);font-size:12px">${selKo} facture(s) en défaut sélectionnée(s)</span>`:''}
@@ -3796,14 +3856,26 @@ function rImport(){
        L'ordre bilan → générale → analytique est respecté : l'inverser fait échouer l'import.</span></div>
      </div>
      <div style="padding:0 24px 24px">
-       ${!impCandidats.length?`<div class="empty"><div class="ei">✅</div><div class="et">Rien à importer</div>
-          <div class="es">Aucune facture avec un compte 488 débiteur sur la période.</div></div>`:`
+       ${impOnglet==='excl' ? (
+         !exclus.length?`<div class="empty"><div class="ei">🚫</div><div class="et">Aucune facture exclue</div></div>`:`
+         <div class="cptab-wrap"><table class="cptab">
+          <thead><tr><th>N° facture</th><th>Fournisseur</th><th>Motif d'exclusion</th><th>Par</th><th>Date</th><th></th></tr></thead>
+          <tbody>${exclus.map(c=>{const e=exclusionsImport[c.f.CleUnique]||{};return `<tr>
+            <td class="mono" style="font-weight:600">${esc(c.f.NumeroFacture||'—')} ${typeBadge(c.f.Typededocument)}</td>
+            <td style="font-size:11.5px">${esc(c.f.Fournisseur||'—')}</td>
+            <td style="font-size:11.5px;color:var(--g500)">${esc(e.motif||'—')}</td>
+            <td style="font-size:11.5px">${esc(String(e.user||'').split(' ')[0])}</td>
+            <td style="font-size:11px;white-space:nowrap">${e.date?new Date(e.date).toLocaleDateString('fr-FR'):'—'}</td>
+            <td><button class="btn bgho bsm" onclick="reintegrerImport('${esc(c.f.CleUnique)}')">↩️ Réintégrer</button></td>
+          </tr>`;}).join('')}</tbody></table></div>`
+       ) : !visibles.length?`<div class="empty"><div class="ei">✅</div><div class="et">Rien à importer</div>
+          <div class="es">${modeApp==='cible'?'Aucune facture avec un 488600 débiteur sur ce périmètre.':'Aucune facture rapprochée de Sage sur ce périmètre.'}</div></div>`:`
        <div class="cptab-wrap"><table class="cptab">
         <thead><tr><th style="width:36px"></th><th>N° facture</th><th>Fournisseur</th><th>Date</th>
           <th style="text-align:right">HT en-tête</th><th style="text-align:right">Σ lignes</th>
-          <th style="text-align:right">488 Sage</th><th style="text-align:center">Lignes</th>
+          <th style="text-align:right">${libModeRef()}</th><th style="text-align:center">Lignes</th>
           <th>Agences</th><th>État</th></tr></thead>
-        <tbody>${impCandidats.slice(0,300).map(c=>{
+        <tbody>${visibles.slice(0,300).map(c=>{
           const ags=[...new Set(c.lignes.map(l=>l.EtablissementAffecte).filter(Boolean))];
           return `<tr style="${c.ko.length?'background:var(--rbg)':''}">
             <td style="text-align:center"><input type="checkbox" ${impSel.has(c.f.CleUnique)?'checked':''} ${c.ko.length?'disabled':''}
@@ -3813,15 +3885,16 @@ function rImport(){
             <td style="font-size:11px;white-space:nowrap">${fd(c.f.DateFacture)}</td>
             <td class="mono" style="text-align:right">${fa(pa(c.f.TotalHT))} €</td>
             <td class="mono" style="text-align:right">${fa(c.somme)} €</td>
-            <td class="mono" style="text-align:right;color:var(--g500)">${c.attente==null?'—':fa(c.attente)+' €'}</td>
+            <td class="mono" style="text-align:right;color:var(--g500)">${refSage(c.sage)==null?'—':fa(refSage(c.sage))+' €'}</td>
             <td style="text-align:center">${c.lignes.length}</td>
             <td style="font-size:11px">${ags.map(a=>`<span class="badge ${sectionDe(a)?'bg2':'br2'}" style="font-size:9.5px" title="${esc(sectionDe(a)||'section inconnue')}">${esc(a.slice(0,22))}</span>`).join(' ')||'—'}</td>
-            <td>${c.ko.length
-              ? `<span class="badge br2" title="${esc(c.ko.join(' · '))}">⛔ ${c.ko.length} blocage(s)</span>`
-              : '<span class="badge bg2">✅ Prête</span>'}
-              <button class="btn bgho bsm" onclick="openPanel('${esc(c.f.CleUnique)}')">Ouvrir</button></td>
+            <td style="white-space:nowrap">${c.ko.length
+              ? `<span class="badge br2" title="${esc(c.ko.join(' · '))}">⛔ ${c.ko.length}</span>`
+              : '<span class="badge bg2">✅</span>'}
+              <button class="btn bgho bsm" onclick="openPanel('${esc(c.f.CleUnique)}')">Ouvrir</button>
+              <button class="btn bgho bsm" title="Exclure de l'import (immo, saisie directe…)" onclick="exclureImport('${esc(c.f.CleUnique)}')">🚫</button></td>
           </tr>`;}).join('')}</tbody></table></div>
-       ${impCandidats.length>300?`<div style="font-size:11.5px;color:var(--g400);margin-top:8px">300 premières affichées sur ${impCandidats.length}.</div>`:''}`}
+       ${impOnglet!=='excl'&&visibles.length>300?`<div style="font-size:11.5px;color:var(--g400);margin-top:8px">300 premières affichées sur ${visibles.length}.</div>`:''}`}
      </div>`;
 
   if(impOnglet==='ana') rMapAna();
@@ -3912,7 +3985,7 @@ function calculerPipeline(){
     const g = idx[numNorm(f.NumeroFacture)];
     if(!g) return;                                    // pas dans Sage : hors pipeline
     const lignes = (parCle[f.CleUnique]||[]).slice().sort((a,b)=>(a.NumeroLigne||0)-(b.NumeroLigne||0));
-    const c = controlesImport(f, lignes);
+    const c = controlesImport(f, lignes, g);
     const cand = {f, sage:g, lignes, ko:c.ko, somme:c.somme, attente:g.a};
 
     if(g.a!=null && g.a<=0.005){
@@ -4244,6 +4317,65 @@ function genererCorrection(i){
 // une erreur de l'IA, c'est une facture qui ne lui est jamais parvenue.
 
 function suivi488(){ return (sageData||[]).some(g=>g.a!=null); }
+
+// ── v46 : MODE DE FONCTIONNEMENT ─────────────────────────────
+// Décision DAF (22/07) : tant que le circuit 488600 n'est pas en
+// production, on FIABILISE l'outil en comparant le 401 (TTC) à la
+// lecture IA. À la bascule, la référence devient le solde 488600,
+// saisi HORS TAXE — la TVA disparaît du problème.
+//   test  : référence = TTC du 401  vs TotalTTC lu par l'IA
+//   cible : référence = solde 488600 HT vs Σ des charges IA
+let modeApp = lgs('tnc_mode') || 'test';
+function refSage(g){
+  if(!g) return null;
+  if(modeApp==='cible') return g.a!=null ? Math.abs(g.a) : null;
+  return g.ttc!=null && g.ttc!==0 ? Math.abs(g.ttc) : Math.abs(Number(g.ht)||0);
+}
+function refIA(f, sommeLignes){
+  return modeApp==='cible' ? (sommeLignes!=null?sommeLignes:Math.abs(pa(f.TotalHT)))
+                           : Math.abs(pa(f.TotalTTC));
+}
+function libModeRef(){ return modeApp==='cible' ? '488600 HT' : '401 TTC'; }
+function basculerMode(m){
+  modeApp=m; lss('tnc_mode',m);
+  pipeCache=null; fiCache=null; impCandidats=null;
+  const el=document.getElementById('mode-pill'); if(el) majModePill();
+  rafraichirVue();
+  toast(m==='cible' ? '🎯 Mode CIBLE : comparaison au 488600 hors taxe'
+                    : '🧪 Mode TEST : comparaison au 401 TTC — écarts de TVA attendus');
+}
+function majModePill(){
+  const el=document.getElementById('mode-pill'); if(!el) return;
+  el.innerHTML = `
+    <button onclick="basculerMode('test')" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;padding:4px 10px;border-radius:12px 0 0 12px;
+      background:${modeApp==='test'?'#fff':'rgba(255,255,255,.15)'};color:${modeApp==='test'?'var(--green)':'rgba(255,255,255,.75)'}">🧪 TEST 401</button>
+    <button onclick="basculerMode('cible')" style="border:none;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;padding:4px 10px;border-radius:0 12px 12px 0;
+      background:${modeApp==='cible'?'#fff':'rgba(255,255,255,.15)'};color:${modeApp==='cible'?'var(--green)':'rgba(255,255,255,.75)'}">🎯 CIBLE 488</button>`;
+}
+
+// ── v46 : EXCLUSIONS D'IMPORT ─────────────────────────────────
+// « Facture d'immo, spécificité qu'on préfère saisir dans Sage » :
+// exclue de l'import, avec motif, réintégrable à tout moment.
+let exclusionsImport={};
+try{ exclusionsImport=JSON.parse(lgs('tnc_excl')||'{}'); }catch(e){}
+function exclSave(){ try{ lss('tnc_excl', JSON.stringify(exclusionsImport)); }catch(e){} }
+function exclureImport(cle){
+  const f=rows.find(r=>r.CleUnique===cle); if(!f) return;
+  const motif=prompt(`Exclure « ${f.NumeroFacture} » de l'import Sage.\nMotif (journalisé) :`,'Saisie directe dans Sage');
+  if(motif===null) return;
+  exclusionsImport[cle]={motif, date:new Date().toISOString(), user:moi(), num:f.NumeroFacture, four:f.Fournisseur};
+  exclSave();
+  journaliser(cle, f.NumeroFacture||'', [{cible:'Facture',champ:'Exclusion import',avant:'',apres:motif,cleLigne:''}], motif);
+  impCandidats=null; construireCandidats();
+  toast('🚫 Exclue de l\'import');
+}
+function reintegrerImport(cle){
+  const e=exclusionsImport[cle]; if(!e) return;
+  delete exclusionsImport[cle]; exclSave();
+  journaliser(cle, e.num||'', [{cible:'Facture',champ:'Exclusion import',avant:e.motif,apres:'(réintégrée)',cleLigne:''}], 'Réintégration');
+  impCandidats=null; construireCandidats();
+  toast('↩️ Réintégrée dans l\'import');
+}
 // Retrouve une pièce Sage par sa référence (pour l'analyse d'écart).
 function __sg(ref){ return (sageData||[]).find(g=>g.ref===ref) || null; }
 // Retrouve la pièce Sage à partir d'un numéro de facture (via la clé normalisée).
