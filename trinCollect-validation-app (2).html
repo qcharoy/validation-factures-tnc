@@ -34,6 +34,8 @@ button{font:inherit;cursor:pointer}
 #btnsage{background:rgba(255,255,255,.16);border:none;color:#fff;font-size:11.5px;padding:5px 12px;border-radius:12px;margin-left:10px}
 #btnsage:hover{background:rgba(255,255,255,.3)}
 #btnsage:disabled{opacity:.55;cursor:wait}
+#sagemaj{font-size:11px;color:rgba(255,255,255,.85);display:inline-flex;align-items:center;gap:5px;margin-left:2px}
+#sagemaj .pt{width:8px;height:8px;border-radius:50%;display:inline-block}
 #uinfo{display:flex;align-items:center;gap:8px;font-size:12.5px}
 #uinfo .pastille{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700}
 #bandeau-test{background:var(--orange-l);color:#7a5200;font-size:12px;padding:5px 18px;border-bottom:1px solid #f2dfb5;display:none}
@@ -149,6 +151,7 @@ tr:hover td{background:var(--g50)}
   <div class="titre">Tri'n'Collect <span>— Imputation analytique</span></div>
   <span id="modep"></span>
   <button id="btnsage" onclick="actualiserSage()" title="Relance l'export Power BI → SharePoint puis recharge les données Sage">⟳ Actualiser Sage</button>
+  <span id="sagemaj" title="Date du fichier sage-achats.json sur SharePoint"></span>
   <span id="sync" style="font-size:11px;opacity:.7"></span>
   <span id="uinfo"></span>
 </div>
@@ -208,6 +211,7 @@ const CFG_DEF={
   sgpath:'/Sage/sage-achats.json',
   whSage:'https://tri-n-collect.app.n8n.cloud/webhook/832f7dd6-94eb-4fe4-b437-2d75ee74607d',
   whChercher:'https://tri-n-collect.app.n8n.cloud/webhook/chercher-absentes',
+  whTraiter:'https://tri-n-collect.app.n8n.cloud/webhook/traiter-email',
   whRetraiter:'https://tri-n-collect.app.n8n.cloud/webhook/retraiter',
   whAnalyse:'https://tri-n-collect.app.n8n.cloud/webhook/analyser-ecart',
   journalImport:'ACC', compte488:'48860000', structure:'1'
@@ -223,6 +227,7 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const numNorm=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^0+/,'');
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const fd=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'})};
+const fdh=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
 const dateFR=s=>{if(!s)return'';const[a,m,j]=String(s).slice(0,10).split('-');return`${j}/${m}/${a}`};
 function toast(m,ms){const t=document.getElementById('toast');t.innerHTML=m;t.classList.add('on');
   clearTimeout(t._);t._=setTimeout(()=>t.classList.remove('on'),ms||3200);}
@@ -603,7 +608,14 @@ function majBadges(){
     st('n-fi',lues?Math.round(R.ok.length/lues*100)+'%':'—');}
   st('n-tt',rows.filter(f=>dansPer(f.DateFacture)).length);
   if(consignes)st('n-co',consignes.filter(c=>c.actif).length);
-  st('n-db',groupesDoublons().filter(x=>!x.dec).length);}
+  st('n-db',groupesDoublons().filter(x=>!x.dec).length);
+  const sm=document.getElementById('sagemaj');
+  if(sm){if(sageMeta&&sageMeta.modifie){
+      const h=(Date.now()-new Date(sageMeta.modifie))/3600000;
+      const cl=h<24?'#7be3a8':h<72?'#ffd27a':'#ff9c9c';
+      sm.innerHTML='<span class="pt" style="background:'+cl+'"></span>Sage : '+fdh(sageMeta.modifie)+' · '+(sageMeta.n||0)+' pièces';
+      sm.title='Fichier sage-achats.json du '+fdh(sageMeta.modifie)+(h>=24?' — plus de '+Math.floor(h/24)+' j, pensez à ⟳':'');}
+    else sm.innerHTML='<span class="pt" style="background:#ff9c9c"></span>Sage : non chargé';}}
 
 function sourcesPretes(){
   if(!sage)return `<div class="vide"><div class="gi">🔗</div><div class="gt">Données Sage non chargées</div>
@@ -625,7 +637,7 @@ function vTB(){
   const okE=R.ok.reduce((s,x)=>s+(refSage(x.g)||0),0);
   const carte=(cl,v,l,e,go)=>`<div class="carte ${cl} click" onclick="${go}"><div class="v">${v}</div><div class="l">${l}</div><div class="e">${e}</div></div>`;
   $.innerHTML=`<h1>🏠 Tableau de bord</h1>
-   <div class="sous">Référence : ${libRef()} · export Sage « ${esc(sageMeta.nom||'')} » du ${fd(sageMeta.modifie)} · ${(lignes||[]).length.toLocaleString('fr-FR')} lignes IA${lignesDate?' (cache '+fd(new Date(lignesDate))+')':''}</div>
+   <div class="sous">Référence : ${libRef()} · export Sage « ${esc(sageMeta.nom||'')} » du ${fdh(sageMeta.modifie)} · ${(lignes||[]).length.toLocaleString('fr-FR')} lignes IA${lignesDate?' (cache '+fd(new Date(lignesDate))+')':''}</div>
    ${barrePer()}
    <div class="cartes">
     ${carte('cr',R.manquantes.length,"Non lues par l'IA",fa(R.manquantes.reduce((s,x)=>s+(refSage(x.g)||0),0))+' € — dans Sage, aucune lecture',`aller('ec')`)}
@@ -693,11 +705,36 @@ async function chercherUne(i){
   try{const r=await fetch(cfg.whChercher,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({pieces:[{ref,tiers:x.g.tiers||'',aux:x.g.aux||'',date:x.g.d||'',montant:refSage(x.g)}],utilisateur:moi()})});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    journaliser('PIECE|'+ref,'',[{cible:'Boîte compta',champ:'Recherche email',avant:'',apres:ref}],'Recherche email — pièce non lue par l\'IA');
-    toast('📬 Recherche de '+ref+' lancée dans la boîte compta — je vous tiens au courant…');
-    suivreUne(i,ref);}
-  catch(e){toast('⛔ '+e.message+' — le workflow MAILBOX-ABSENTES est-il actif ?');
+    let d=await r.json();if(Array.isArray(d))d=d[0]||{};
+    const cands=d.candidats||[];
+    if(b){b.disabled=false;b.textContent='📬 Email';}
+    if(!cands.length){toast('📭 '+ref+' : aucun email avec PJ dans la boîte depuis le début du mois comptable');return;}
+    window._mbCands=cands;window._mbCtx={i,ref};
+    openMo(`<h3>📬 ${cands.length} email(s) candidat(s) — pièce ${esc(ref)}</h3>
+     <div class="sous">${esc(x.g.tiers||x.g.aux||'')} · ${fa(refSage(x.g))} € · vérifiez expéditeur et pièces jointes avant d'envoyer au worker</div>
+     ${cands.map((c,k)=>`<div style="border:1.5px solid ${c.refVisible?'var(--vert)':'var(--g200)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;background:${c.refVisible?'var(--vert-l)':'#fff'}">
+       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+         <b style="font-size:13px">${esc(c.sujet||'(sans objet)')}</b>
+         ${c.refVisible?'<span class="tag v">réf. dans le sujet/corps</span>':'<span class="tag o">réf. trouvée ailleurs (nom de PJ ?)</span>'}
+       </div>
+       <div style="font-size:12px;color:var(--g500);margin:3px 0">${esc(c.de||'')} &lt;${esc(c.adresse||'')}&gt; · reçu le ${fd(c.recu)}</div>
+       <div style="margin:5px 0">${(c.pjs||[]).map(p=>`<span class="tag ${/\.pdf$/i.test(p.nom)?'b':'g'}" style="margin:0 4px 4px 0;display:inline-block">📎 ${esc(p.nom)} · ${p.ko} Ko</span>`).join('')||'<span class="tag g">PJ non listées</span>'}</div>
+       <div style="text-align:right"><button class="b principal" onclick="envoyerCandidat(${k})">📤 C'est celui-là — envoyer au worker</button></div>
+     </div>`).join('')}
+     <div style="text-align:right;margin-top:8px"><button class="b" onclick="closeMo()">Aucun ne correspond</button></div>`,true);}
+  catch(e){toast('⛔ '+e.message+' — le workflow MAILBOX-ABSENTES v2 est-il actif ?');
     if(b){b.disabled=false;b.textContent='📬 Email';}}}
+async function envoyerCandidat(k){
+  const c=(window._mbCands||[])[k];const ctx=window._mbCtx||{};if(!c)return;
+  closeMo();
+  try{const r=await fetch(cfg.whTraiter,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({emailMessageId:c.id,ref:ctx.ref,utilisateur:moi()})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    journaliser('PIECE|'+ctx.ref,'',[{cible:'Boîte compta',champ:'Email envoyé au worker',avant:'',
+      apres:(c.sujet||'').slice(0,120)}],'Email confirmé manuellement — pièce non lue');
+    toast('📤 Email envoyé au worker — je surveille la lecture…');
+    suivreUne(ctx.i,ctx.ref);}
+  catch(e){toast('⛔ '+e.message);}}
 async function suivreUne(i,ref){
   const refN=numNorm(ref);const t0=Date.now();
   while(Date.now()-t0<8*60000){
@@ -1045,16 +1082,20 @@ function rendreFiche(f,lg){
     (/avoir/i.test(f.Typededocument||'')?'<span class="tag r">AVOIR</span> ':'')+
     (ec==null?'<span class="tag g">non rapprochée</span>':Math.abs(ec)<=0.02?'<span class="tag v">✓ juste au centime</span>':`<span class="tag o">écart ${fa(ec)} €</span>`);
   document.getElementById('fiche-actions').innerHTML=
-    (String(f.LienFacture||'').startsWith('http')?`<a class="b" href="${esc(f.LienFacture)}" target="_blank">📄 PDF</a>`:'')+
+    (String(f.LienFacture||'').startsWith('http')?`<button class="b" onclick="ouvrirPDF('${esc(f.LienFacture)}')">📄 PDF</button>`:'')+
     `<button class="b" onclick="retraiterUne('${esc(f.CleUnique)}')">🔄 Renvoyer à l'IA</button>
      <button class="b" onclick="analyserFiche('${esc(f.CleUnique)}')">🔎 Analyse IA</button>
      <button class="b" onclick="histFiche('${esc(f.CleUnique)}')">🕘 Historique</button>`;
   const gi=(k,v)=>`<div class="gitem"><div class="gk">${k}</div><div class="gv">${v||'—'}</div></div>`;
+  const ge=(k,ch,type)=>`<div class="gitem"><div class="gk">${k} ✎</div>
+    <input type="${type||'text'}" style="width:${type==='date'?'130px':'100px'};font-size:12.5px;padding:3px 6px;${type==='date'?'':'text-align:right'}"
+      value="${type==='date'?String(f[ch]||'').slice(0,10):(pa(f[ch])||'')}"
+      onchange="majEntete('${ch}',this.value);this.classList.add('mod')"></div>`;
   document.getElementById('fiche-corps').innerHTML=`
    <div style="font-size:13px;color:var(--g500);margin-bottom:10px">${esc(f.Fournisseur||'—')} · SIREN ${esc(String(f.SIRET||'').slice(0,9)||'—')}</div>
    <div class="grille">
-     ${gi('Date facture',fd(f.DateFacture))}${gi('Échéance',fd(f.DateEcheance))}${gi('Statut',esc(f.Statut||'—'))}
-     ${gi('TTC lu par l\'IA',fa(pa(f.TotalTTC))+' €')}${gi('HT lu',fa(pa(f.TotalHT))+' €')}${gi('TVA lue',fa(pa(f.TVA))+' €')}
+     ${ge('Date facture','DateFacture','date')}${ge('Échéance','DateEcheance','date')}${gi('Statut',esc(f.Statut||'—'))}
+     ${ge('TTC lu par l\'IA','TotalTTC')}${ge('HT lu','TotalHT')}${ge('TVA lue','TVA')}
      ${gi('Σ lignes HT',fa(c.somme)+' €')}
      ${rS!=null?gi(libRef()+' (Sage)',fa(rS)+' €'):gi('Sage','non rapprochée')}
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
@@ -1087,6 +1128,13 @@ function analyserFiche(cle){
   const R=sage&&lignes?rapprocher():null;
   const x=R?(R.ecarts.find(y=>y.f.CleUnique===cle)||R.ok.find(y=>y.f.CleUnique===cle)):null;
   analyserIA(cle,x?{g:x.g,ecart:x.ecart||0}:null);}
+function majEntete(champ,val){
+  const f=window._ficheF;if(!f)return;
+  const apres=champ.startsWith('Date')?val:pa(val);
+  ficheDirty['E|'+champ]={ent:true,champ,avant:f[champ],apres};
+  const n=Object.keys(ficheDirty).length;
+  const b=document.getElementById('fsave');if(b){b.disabled=!n;b.textContent=`💾 Enregistrer (${n})`;}}
+function ouvrirPDF(u){window.open(u,'tncpdf','popup=yes,width=1000,height=1000,left=60,top=30');}
 function majLigne(i,champ,val){
   const lg=window._ficheLg;if(!lg||!lg[i])return;
   const idL=lg[i].id||lg[i]._id;if(!idL){toast('⛔ Identifiant de ligne inconnu — rechargez la fiche');return;}
@@ -1100,13 +1148,19 @@ async function sauverFiche(){
   if(!motif){toast('Correction annulée — le motif est obligatoire');return;}
   const b=document.getElementById('fsave');if(b){b.disabled=true;b.textContent='⏳…';}
   let ok=0,ko=0;
-  for(const m of mods){
+  const entete=mods.filter(m=>m.ent),lig=mods.filter(m=>!m.ent);
+  for(const m of lig){
     try{await gWrite('PATCH',`/sites/${cfg.site}/lists/${cfg.lLignes}/items/${m.id}/fields`,
         {[m.champ]:m.champ==='MontantHT'?Number(m.apres)||0:m.apres});
       lg[m.i][m.champ]=m.champ==='MontantHT'?Number(m.apres)||0:m.apres;ok++;}
     catch(e){ko++;console.error('[fiche]',e.message);}}
+  if(entete.length){
+    const flds={};entete.forEach(m=>{flds[m.champ]=m.champ.startsWith('Date')?m.apres:Number(m.apres)||0;});
+    try{await gWrite('PATCH',`/sites/${cfg.site}/lists/${cfg.lFactures}/items/${f._id}/fields`,flds);
+      entete.forEach(m=>{f[m.champ]=flds[m.champ];});ok+=entete.length;}
+    catch(e){ko+=entete.length;console.error('[fiche/entête]',e.message);}}
   try{await journaliser(f.CleUnique,f.NumeroFacture||'',
-    mods.map(m=>({cleLigne:m.cleLigne,cible:'Ligne',champ:m.champ,
+    mods.map(m=>({cleLigne:m.cleLigne||'',cible:m.ent?'Facture (en-tête)':'Ligne',champ:m.champ,
       avant:String(m.avant??''),apres:String(m.apres??'')})),motif);}catch(e){}
   if(lignes)idbEcrire('lignes',{d:lignesDate||Date.now(),l:lignes});
   _rap=null;ficheDirty={};
@@ -1133,7 +1187,7 @@ async function histFiche(cle){
   }catch(e){z.innerHTML=`<div class="alerte">⛔ Journal inaccessible : ${esc(e.message)}</div>`;}}
 
 /* ═══ PARAMÈTRES ═══════════════════════════════════════════════ */
-const PARAM_KEYS=['sgurl','whSage','whRetraiter','whAnalyse','whChercher','journalImport','compte488','structure',
+const PARAM_KEYS=['sgurl','whSage','whRetraiter','whAnalyse','whChercher','whTraiter','journalImport','compte488','structure',
   'lFactures','lLignes','lConsignes','lJournal','lDecisions'];
 function ouvrirParams(){
   const ch=(k,l)=>`<div style="margin-bottom:9px"><div style="font-size:11px;color:var(--g400);margin-bottom:2px">${l}</div>
@@ -1147,6 +1201,7 @@ function ouvrirParams(){
     ${ch('whRetraiter','Webhook n8n — retraitement')}
     ${ch('whAnalyse',"Webhook n8n — analyse d'écart")}
     ${ch('whChercher','Webhook n8n — recherche boîte compta (pièces non lues)')}
+    ${ch('whTraiter','Webhook n8n — envoi au worker après confirmation')}
     <h1 style="font-size:12.5px;margin:12px 0 6px;color:var(--vert)">Import Sage</h1>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
     ${ch('journalImport','Journal')}${ch('compte488',"Compte d'attente")}${ch('structure','N° structure analytique')}</div>
