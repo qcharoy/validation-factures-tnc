@@ -31,6 +31,9 @@ button{font:inherit;cursor:pointer}
 #modep .off{background:rgba(255,255,255,.16);color:rgba(255,255,255,.8)}
 #modep button:first-child{border-radius:12px 0 0 12px}
 #modep button:last-child{border-radius:0 12px 12px 0}
+#btnsage{background:rgba(255,255,255,.16);border:none;color:#fff;font-size:11.5px;padding:5px 12px;border-radius:12px;margin-left:10px}
+#btnsage:hover{background:rgba(255,255,255,.3)}
+#btnsage:disabled{opacity:.55;cursor:wait}
 #uinfo{display:flex;align-items:center;gap:8px;font-size:12.5px}
 #uinfo .pastille{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700}
 #bandeau-test{background:var(--orange-l);color:#7a5200;font-size:12px;padding:5px 18px;border-bottom:1px solid #f2dfb5;display:none}
@@ -145,6 +148,7 @@ tr:hover td{background:var(--g50)}
   <div class="logo">♻️</div>
   <div class="titre">Tri'n'Collect <span>— Imputation analytique</span></div>
   <span id="modep"></span>
+  <button id="btnsage" onclick="actualiserSage()" title="Relance l'export Power BI → SharePoint puis recharge les données Sage">⟳ Actualiser Sage</button>
   <span id="sync" style="font-size:11px;opacity:.7"></span>
   <span id="uinfo"></span>
 </div>
@@ -200,6 +204,9 @@ const CFG_DEF={
   lJournal:'933d4d28-7425-477a-a91e-f4ef31b7d3d1',
   lDecisions:'8565b254-07b6-427f-813d-8d2b9c2f5d55',
   sgurl:'',
+  sgdrive:'b!J20wOzPDwU-SEZ94ic-HacYp0dSd7HFKruMFfBby2LdmJePb8HkcQKP4GhpGqEY9',
+  sgpath:'/Sage/sage-achats.json',
+  whSage:'https://tri-n-collect.app.n8n.cloud/webhook/832f7dd6-94eb-4fe4-b437-2d75ee74607d',
   whRetraiter:'https://tri-n-collect.app.n8n.cloud/webhook/retraiter',
   whAnalyse:'https://tri-n-collect.app.n8n.cloud/webhook/analyser-ecart',
   journalImport:'ACC', compte488:'48860000', structure:'1'
@@ -297,7 +304,8 @@ const MAP_ANA_DEF={
  "49 - Agence d'Angers":'MAINEL4901','56 - Agence de Lorient':'MORBIH5601',
  '56 - Agence de Vannes':'MORBIH5602','59 - Agence de Lille':'NORDXX5901',
  '85 - Agence de la Roche sur Yon':'VENDEE8502','93 - Agence de Paris Nord Est':'SEINED9301',
- '94 - Agence de Paris Sud Est':'VALDEM9401','DS - Agence de déconstruction sélective':'DECONS0000'};
+ '94 - Agence de Paris Sud Est':'VALDEM9401','DS - Agence de déconstruction sélective':'DECONS0000',
+ 'Siège':'SIEGEXXXXX'};
 mapAna=Object.assign({},MAP_ANA_DEF);
 try{mapAna=Object.assign(mapAna,JSON.parse(lgs('tnc2_ana')||'{}'))}catch(e){}
 const sectionDe=a=>mapAna[String(a||'').trim()]||'';
@@ -368,9 +376,19 @@ async function rafraichirLignesFond(){if(_refond)return;_refond=true;
 function lignesDe(cle){return(lignes||[]).filter(l=>l.CleUnique===cle)
   .sort((a,b)=>(a.NumeroLigne||0)-(b.NumeroLigne||0));}
 
+async function metaSage(){
+  if(cfg.sgurl){const enc=btoa(unescape(encodeURIComponent(cfg.sgurl))).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
+    return gGet('/shares/u!'+enc+'/driveItem');}
+  return gGet(`/drives/${cfg.sgdrive}/root:${cfg.sgpath}`);}
 async function chargerSage(){
-  if(!cfg.sgurl){sage=null;return;}
-  try{const f=await lireFichierPartage(cfg.sgurl);
+  try{let f;
+    if(cfg.sgurl)f=await lireFichierPartage(cfg.sgurl);
+    else{const meta=await gGet(`/drives/${cfg.sgdrive}/root:${cfg.sgpath}`);
+      const t=await jeton();
+      const r=await fetch(`https://graph.microsoft.com/v1.0/drives/${cfg.sgdrive}/root:${cfg.sgpath}:/content`,
+        {headers:{Authorization:'Bearer '+t}});
+      if(!r.ok)throw new Error('sage-achats.json introuvable (HTTP '+r.status+') — lancez ⟳ Actualiser Sage');
+      f={texte:await r.text(),nom:meta.name,modifie:meta.lastModifiedDateTime};}
     let j=JSON.parse(f.texte);
     if(Array.isArray(j)){const env=j.filter(x=>x&&Array.isArray(x.pieces));
       j=env.length?env.flatMap(x=>x.pieces):j;}
@@ -588,8 +606,9 @@ function majBadges(){
 
 function sourcesPretes(){
   if(!sage)return `<div class="vide"><div class="gi">🔗</div><div class="gt">Données Sage non chargées</div>
-    <div style="margin-top:6px;font-size:12px">${sageMeta&&sageMeta.erreur?esc(sageMeta.erreur):"Renseignez l'URL du fichier sage-achats.json dans ⚙️ Paramètres."}</div>
-    <div style="margin-top:12px"><button class="b principal" onclick="boot(true)">↻ Recharger</button>
+    <div style="margin-top:6px;font-size:12px">${sageMeta&&sageMeta.erreur?esc(sageMeta.erreur):"Le fichier sage-achats.json n'a pas encore été déposé sur SharePoint."}</div>
+    <div style="margin-top:12px"><button class="b principal" onclick="actualiserSage()">⟳ Actualiser Sage</button>
+    <button class="b" onclick="boot(true)">↻ Recharger</button>
     <button class="b" onclick="ouvrirParams()">⚙️ Paramètres</button></div></div>`;
   if(!lignes)return `<div class="vide"><div class="gi">⏳</div><div class="gt">Lignes comptables en cours de chargement…</div></div>`;
   return null;}
@@ -640,9 +659,10 @@ function vEC(){
    </div>
    <h1 style="font-size:14px;margin-bottom:6px">Écarts de montant (${le.length})</h1>
    <div class="twrap" style="margin-bottom:18px"><table><thead><tr>
-     <th>N° pièce</th><th>Fournisseur</th><th class="dr">Montant IA</th><th class="dr">Montant Sage</th><th class="dr">Écart</th><th></th></tr></thead><tbody>
+     <th>N° pièce</th><th>Fournisseur</th><th>Tiers Sage (CT_Num)</th><th class="dr">Montant IA</th><th class="dr">Montant Sage</th><th class="dr">Écart</th><th></th></tr></thead><tbody>
     ${le.map((x,i)=>`<tr>
-      <td class="mono">${esc(x.g.r)}</td><td>${esc(x.f.Fournisseur||x.g.tiers)}</td>
+      <td class="mono">${esc(x.g.r)}</td><td>${esc(x.f.Fournisseur||'—')}</td>
+      <td style="font-size:11px"><span class="mono">${esc(x.g.aux||'—')}</span><br><span style="color:var(--g400)">${esc(x.g.tiers||'')}</span></td>
       <td class="dr"><span class="duo"><span class="ia">${fa(x.mI)}</span><span class="sep">|</span></span></td>
       <td class="dr"><span class="sg">${fa(x.mS)}</span></td>
       <td class="dr ecart-ko">${fa(x.ecart)} €</td>
@@ -650,14 +670,14 @@ function vEC(){
         <button class="b" onclick="ouvrirFiche('${esc(x.f.CleUnique)}')">Ouvrir</button>
         <button class="b" title="Analyse IA de l'écart" onclick="analyserEcartIdx(${i})">🔎 Analyser</button>
         <button class="b" title="Retraiter le fournisseur" onclick='retraiterFournisseur(${JSON.stringify(x.f.Fournisseur||'')})'>🔄</button>
-      </td></tr>`).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--g400);padding:18px">Aucun écart 🎉</td></tr>'}
+      </td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:18px">Aucun écart 🎉</td></tr>'}
    </tbody></table></div>
    <h1 style="font-size:14px;margin-bottom:6px">Dans Sage mais jamais lues par l'IA (${R.manquantes.length})</h1>
-   <div class="twrap"><table><thead><tr><th>N° pièce</th><th>Tiers</th><th>Date</th><th class="dr">${libRef()}</th><th>Comptes Sage</th></tr></thead><tbody>
-    ${lm.map(x=>`<tr><td class="mono">${esc(x.g.r)}</td><td>${esc(x.g.tiers||'—')}</td>
+   <div class="twrap"><table><thead><tr><th>N° pièce</th><th>Tiers (CT_Num)</th><th>Intitulé tiers</th><th>Date</th><th class="dr">${libRef()}</th><th>Comptes Sage</th></tr></thead><tbody>
+    ${lm.map(x=>`<tr><td class="mono">${esc(x.g.r)}</td><td class="mono">${esc(x.g.aux||'—')}</td><td>${esc(x.g.tiers||'—')}</td>
       <td>${fd(x.g.d)}</td><td class="dr">${fa(refSage(x.g))} €</td>
       <td style="font-size:11px;color:var(--g400)">${esc((x.g.comptes||[]).slice(0,3).join(', '))}</td></tr>`).join('')
-     ||'<tr><td colspan="5" style="text-align:center;color:var(--g400);padding:18px">Tout est lu ✅</td></tr>'}
+     ||'<tr><td colspan="6" style="text-align:center;color:var(--g400);padding:18px">Tout est lu ✅</td></tr>'}
    </tbody></table></div>`;}
 function analyserEcartIdx(i){const R=rapprocher();
   const x=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart))[i];
@@ -725,7 +745,7 @@ function vIM(){
    ${lots.length?`<div style="margin-top:14px;font-size:11px;color:var(--g400)">Derniers lots générés : ${lots.slice(0,3).map(l=>l.id+' ('+l.n+' fact., '+fa(l.deb)+' €, '+l.mode+')').join(' · ')}</div>`:''}`;}
 function tableImport(vis){
   return `<div class="twrap"><table><thead><tr><th style="width:30px"></th>
-    <th>N° facture</th><th>Fournisseur</th><th>Date</th>
+    <th>N° facture</th><th>Fournisseur</th><th>Tiers</th><th>Date</th>
     <th class="dr">Σ charges IA</th><th class="dr">${libRef()}</th><th class="dr">Écart</th>
     <th>Contrôles</th><th></th></tr></thead><tbody>
    ${vis.slice(0,400).map(c=>{const rS=refSage(c.g)||0;
@@ -734,13 +754,15 @@ function tableImport(vis){
       <td><input type="checkbox" ${impSel.has(c.f.CleUnique)?'checked':''} ${c.ko.length?'disabled':''}
           onchange="if(this.checked)impSel.add('${esc(c.f.CleUnique)}');else impSel.delete('${esc(c.f.CleUnique)}');rendre()"></td>
       <td class="mono" style="font-weight:600">${esc(c.f.NumeroFacture||'—')} ${/avoir/i.test(c.f.Typededocument||'')?'<span class="tag r">AVOIR</span>':''}</td>
-      <td>${esc(c.f.Fournisseur||'—')}</td><td>${fd(c.f.DateFacture)}</td>
+      <td>${esc(c.f.Fournisseur||'—')}</td>
+      <td class="mono" style="font-size:11px" title="${esc(c.g&&c.g.tiers||'')}">${esc(c.g&&c.g.aux||'—')}</td>
+      <td>${fd(c.f.DateFacture)}</td>
       <td class="dr">${fa(c.somme)} €</td><td class="dr">${fa(rS)} €</td>
       <td class="dr ${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</td>
       <td style="font-size:11px">${c.ko.length?c.ko.map(k=>`<div style="color:var(--rouge)">• ${esc(k)}</div>`).join(''):'<span class="tag v">✅ prête</span>'}</td>
       <td style="white-space:nowrap"><button class="b" onclick="ouvrirFiche('${esc(c.f.CleUnique)}')">Ouvrir</button>
         <button class="b" title="Exclure de l'import" onclick="exclure('${esc(c.f.CleUnique)}')">🚫</button></td>
-     </tr>`;}).join('')||'<tr><td colspan="9" style="text-align:center;color:var(--g400);padding:20px">Aucune facture éligible sur ce périmètre</td></tr>'}
+     </tr>`;}).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--g400);padding:20px">Aucune facture éligible sur ce périmètre</td></tr>'}
   </tbody></table></div>`;}
 function tableExclues(ex){
   return `<div class="twrap"><table><thead><tr><th>N° facture</th><th>Fournisseur</th><th>Motif</th><th>Par</th><th>Date</th><th></th></tr></thead><tbody>
@@ -932,6 +954,9 @@ function vTT(){
   const R=sage&&lignes?rapprocher():null;
   const okSet=R?new Set(R.ok.map(x=>x.f.CleUnique)):null;
   const ecMap=R?new Map(R.ecarts.map(x=>[x.f.CleUnique,x.ecart])):null;
+  const gMap=R?new Map([...R.ok,...R.ecarts].map(x=>[x.f.CleUnique,x.g])):null;
+  const tiersDe=f=>{const g=gMap&&gMap.get(f.CleUnique);
+    return g?`<span class="mono">${esc(g.aux||'—')}</span> <span style="color:var(--g400);font-size:11px">${esc(g.tiers||'')}</span>`:'—';};
   const etat=f=>{if(!R)return '';
     if(okSet.has(f.CleUnique))return '<span class="tag v">✓ juste</span>';
     if(ecMap.has(f.CleUnique))return `<span class="tag o">écart ${fa(ecMap.get(f.CleUnique))} €</span>`;
@@ -942,10 +967,11 @@ function vTT(){
    <div class="barre"><input type="text" placeholder="🔎 n° facture, fournisseur, SIREN…" value="${esc(ttQ)}"
      style="flex:1;max-width:380px" oninput="ttQ=this.value;clearTimeout(window._tq);window._tq=setTimeout(rendre,250)">
      <span style="font-size:11.5px;color:var(--g400)">${fac.length} facture(s)</span></div>
-   <div class="twrap"><table><thead><tr><th>N° facture</th><th>Fournisseur</th><th>Type</th><th>Date</th><th class="dr">TTC lu</th><th>Rapprochement</th><th>Statut</th><th></th></tr></thead><tbody>
+   <div class="twrap"><table><thead><tr><th>N° facture</th><th>Fournisseur</th><th>Tiers Sage</th><th>Type</th><th>Date</th><th class="dr">TTC lu</th><th>Rapprochement</th><th>Statut</th><th></th></tr></thead><tbody>
    ${fac.slice(0,300).map(f=>`<tr>
      <td class="mono" style="font-weight:600">${esc(f.NumeroFacture||'—')}</td>
      <td>${esc(f.Fournisseur||'—')}</td>
+     <td>${tiersDe(f)}</td>
      <td>${/avoir/i.test(f.Typededocument||'')?'<span class="tag r">AVOIR</span>':'Facture'}</td>
      <td>${fd(f.DateFacture)}</td><td class="dr">${fa(pa(f.TotalTTC))} €</td>
      <td>${etat(f)}</td><td style="font-size:11px">${esc(f.Statut||'—')}</td>
@@ -1000,7 +1026,7 @@ function rendreFiche(f,lg){
      ${gi('Σ lignes HT',fa(c.somme)+' €')}
      ${rS!=null?gi(libRef()+' (Sage)',fa(rS)+' €'):gi('Sage','non rapprochée')}
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
-     ${g&&g.aux?gi('Compte tiers',esc(g.aux)):''}
+     ${g&&g.aux?gi('Tiers Sage (CT_Num)','<span class="mono">'+esc(g.aux)+'</span>'+(g.tiers?' · '+esc(g.tiers):'')):''}
    </div>
    ${c.ko.length?`<div class="alerte">⚠️ ${c.ko.map(esc).join(' · ')}</div>`:'<div class="info" style="padding:7px 11px">✅ Tous les contrôles passent.</div>'}
    <h1 style="font-size:13.5px;margin:12px 0 6px">Lignes analytiques (${lg.length}) — modifiables, motif obligatoire</h1>
@@ -1075,7 +1101,7 @@ async function histFiche(cle){
   }catch(e){z.innerHTML=`<div class="alerte">⛔ Journal inaccessible : ${esc(e.message)}</div>`;}}
 
 /* ═══ PARAMÈTRES ═══════════════════════════════════════════════ */
-const PARAM_KEYS=['sgurl','whRetraiter','whAnalyse','journalImport','compte488','structure',
+const PARAM_KEYS=['sgurl','whSage','whRetraiter','whAnalyse','journalImport','compte488','structure',
   'lFactures','lLignes','lConsignes','lJournal','lDecisions'];
 function ouvrirParams(){
   const ch=(k,l)=>`<div style="margin-bottom:9px"><div style="font-size:11px;color:var(--g400);margin-bottom:2px">${l}</div>
@@ -1084,7 +1110,8 @@ function ouvrirParams(){
    <div class="sous">Tout est pré-rempli avec les valeurs de production — ne modifiez que ce qui change.</div>
    <div style="max-height:52vh;overflow:auto;padding-right:4px">
     <h1 style="font-size:12.5px;margin:8px 0 6px;color:var(--vert)">Sources de données</h1>
-    ${ch('sgurl','URL du fichier sage-achats.json (SharePoint — déposé chaque nuit par WF-SAGE-EXPORT)')}
+    ${ch('sgurl','URL du fichier Sage (facultatif — vide = emplacement standard /Sage/sage-achats.json, chargé automatiquement)')}
+    ${ch('whSage','Webhook n8n — actualisation des données Sage (bouton ⟳)')}
     ${ch('whRetraiter','Webhook n8n — retraitement')}
     ${ch('whAnalyse',"Webhook n8n — analyse d'écart")}
     <h1 style="font-size:12.5px;margin:12px 0 6px;color:var(--vert)">Import Sage</h1>
@@ -1109,6 +1136,33 @@ function sauverParams(){
     if(v===String(CFG_DEF[k]||'')){try{localStorage.removeItem('tnc2_'+k)}catch(err){}}
     else setCfg(k,v);});
   closeMo();toast('💾 Paramètres enregistrés — rechargement…');boot(true);}
+
+/* ═══ ACTUALISATION SAGE À LA DEMANDE ═════════════════════════ */
+async function actualiserSage(){
+  const b=document.getElementById('btnsage');
+  if(b&&b.disabled)return;
+  if(b){b.disabled=true;b.innerHTML='<span class="spin" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span>Export en cours…';}
+  const fin=msg=>{if(b){b.disabled=false;b.textContent='⟳ Actualiser Sage';}if(msg)toast(msg,6000);};
+  let avant='';try{avant=(await metaSage()).lastModifiedDateTime||'';}catch(e){}
+  // Déclenchement du webhook. Si CORS bloque la lecture de la réponse,
+  // la requête part quand même : on bascule en mode « aveugle » et on
+  // surveille la date du fichier sur SharePoint.
+  let lance=false;
+  try{const r=await fetch(cfg.whSage,{method:'GET'});lance=r.ok;}catch(e){}
+  if(!lance){try{await fetch(cfg.whSage,{method:'GET',mode:'no-cors'});lance=true;}catch(e){}}
+  if(!lance){try{await fetch(cfg.whSage,{method:'POST',mode:'no-cors'});lance=true;}catch(e){}}
+  if(!lance){fin('⛔ Webhook injoignable — vérifiez ⚙️ Paramètres et que le workflow n8n est actif');return;}
+  toast('🔄 Export Sage lancé (Power BI → SharePoint)… surveillance du dépôt en cours',6000);
+  const t0=Date.now();
+  while(Date.now()-t0<180000){
+    await new Promise(r=>setTimeout(r,8000));
+    try{const m=await metaSage();
+      if(m.lastModifiedDateTime&&m.lastModifiedDateTime!==avant){
+        await chargerSage();_rap=null;rendre();
+        fin('✅ Données Sage actualisées — '+(sageMeta&&sageMeta.n||0)+' pièces, fichier du '+fd(sageMeta&&sageMeta.modifie));
+        return;}}
+    catch(e){}}
+  fin("⏱ Aucun nouveau fichier après 3 min — l'export a peut-être échoué, regardez les exécutions n8n (WF-SAGE-EXPORT)");}
 
 /* ═══ DÉMARRAGE ════════════════════════════════════════════════ */
 function majUinfo(){
