@@ -364,19 +364,19 @@ async function chargerFactures(){
 
 async function chargerLignes(forcer){
   if(lignes&&!forcer)return lignes;
-  if(!forcer){const c=await idbLire('lignes');
-    if(c&&c.l&&c.l.length){lignes=c.l;lignesDate=c.d;
+  if(!forcer){const c=await idbLire('lignes2');
+    if(c&&c.l&&c.l.length&&c.l[0].id){lignes=c.l;lignesDate=c.d;
       if(Date.now()-c.d>6*3600*1000)rafraichirLignesFond();
       return lignes;}}
   const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lLignes}/items?$expand=fields($select=${CHAMPS_LIGNE})&$top=999`);
-  lignes=items.map(it=>it.fields).filter(Boolean);lignesDate=Date.now();
-  idbEcrire('lignes',{d:lignesDate,l:lignes});
+  lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));lignesDate=Date.now();
+  idbEcrire('lignes2',{d:lignesDate,l:lignes});
   return lignes;}
 let _refond=false;
 async function rafraichirLignesFond(){if(_refond)return;_refond=true;
   try{const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lLignes}/items?$expand=fields($select=${CHAMPS_LIGNE})&$top=999`);
-    lignes=items.map(it=>it.fields).filter(Boolean);lignesDate=Date.now();
-    idbEcrire('lignes',{d:lignesDate,l:lignes});_rap=null;
+    lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));lignesDate=Date.now();
+    idbEcrire('lignes2',{d:lignesDate,l:lignes});_rap=null;
     toast('🗄️ Lignes comptables mises à jour ('+lignes.length.toLocaleString('fr-FR')+')');rendre();}
   catch(e){console.warn('[cache]',e.message);}_refond=false;}
 function lignesDe(cle){return(lignes||[]).filter(l=>l.CleUnique===cle)
@@ -592,6 +592,10 @@ function rendre(){
   const V={tb:vTB,ec:vEC,im:vIM,fi:vFI,co:vCO,db:vDB,tt:vTT};
   (V[vueActive]||vTB)();
   majBadges();}
+const tagDoc=f=>{const t=String(f&&f.Typededocument||'');
+  if(/avoir/i.test(t))return '<span class="tag r">AVOIR</span>';
+  if(/rachat|bordereau/i.test(t))return '<span class="tag" style="background:var(--violet-l);color:var(--violet)">RACHAT</span>';
+  return '';};
 const cleGroupe=g=>g.map(x=>x.CleUnique||'').sort().join('+').slice(0,250);
 function groupesDoublons(){
   const grp={};rows.filter(f=>dansPer(f.DateFacture)).forEach(f=>{
@@ -752,15 +756,40 @@ function analyserEcartIdx(i){const R=rapprocher();
   const x=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart))[i];
   if(x)analyserIA(x.f.CleUnique,{g:x.g,ecart:x.ecart});}
 function retraiterFournisseur(four){
-  const cible=String(four||'').toLowerCase();
-  const fac=rows.filter(f=>dansPer(f.DateFacture)
-    &&String(f.Fournisseur||'').toLowerCase().includes(cible)
-    &&String(f.LienFacture||'').startsWith('http'));
-  if(!fac.length){toast('Aucune facture avec PDF pour « '+esc(four)+' » sur la période');return;}
-  if(!confirm(`Renvoyer ${fac.length} facture(s) de « ${four} » à l'IA ?\n(à faire APRÈS avoir corrigé la consigne)`))return;
-  const m=prompt("Qu'avez-vous corrigé ? (journalisé)",'Consigne fournisseur corrigée');
-  if(m!==null)retraiter(fac.map(f=>f.CleUnique),m,four);}
-
+  window._rfFour=four;
+  openMo(`<h3>🔄 Relire les factures de « ${esc(four)} »</h3>
+   <div class="sous">À faire APRÈS avoir corrigé la consigne. Limitez la période : chaque facture renvoyée = une lecture IA complète.</div>
+   <div class="barre"><span class="lab">Factures du</span><input type="date" id="rf-du" value="${per.du||''}" onchange="rfMaj()">
+     <span class="lab">au</span><input type="date" id="rf-au" value="${per.au||''}" onchange="rfMaj()"></div>
+   <div id="rf-n" class="info" style="padding:7px 11px"></div>
+   <div style="margin:10px 0 12px"><div class="lab" style="margin-bottom:3px">Qu'avez-vous corrigé ? (journalisé)</div>
+     <input type="text" id="rf-motif" style="width:100%" value="Consigne fournisseur corrigée"></div>
+   <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end">
+     <button class="b" onclick="closeMo()">Annuler</button>
+     <button class="b principal" id="rf-go" onclick="rfEnvoyer()">🔄 Renvoyer à l'IA</button></div>`);
+  rfMaj();}
+function rfCles(){
+  const four=String(window._rfFour||'').toLowerCase();
+  const du=(document.getElementById('rf-du')||{}).value||'';
+  const au=(document.getElementById('rf-au')||{}).value||'';
+  return rows.filter(f=>{const d=String(f.DateFacture||'').slice(0,10);
+    return String(f.Fournisseur||'').toLowerCase().includes(four)
+      &&String(f.LienFacture||'').startsWith('http')
+      &&(!du||d>=du)&&(!au||d<=au);}).map(f=>f.CleUnique);}
+function rfMaj(){
+  const n=rfCles().length;
+  const z=document.getElementById('rf-n');
+  if(z)z.innerHTML=n
+    ?`<b>${n}</b> facture(s) avec PDF seront relues${n>60?' — <b style="color:var(--orange)">gros lot</b>, resserrez les dates si possible':''}${n>200?' — <b style="color:var(--rouge)">le workflow refusera au-delà de 200</b>':''}`
+    :'Aucune facture avec PDF sur cette période.';
+  const b=document.getElementById('rf-go');if(b)b.disabled=!n||n>200;}
+async function rfEnvoyer(){
+  const cles=rfCles();if(!cles.length)return;
+  const m=(document.getElementById('rf-motif')||{}).value||'Relecture';
+  if(cles.length>60&&!confirm(cles.length+' factures vont être relues par l\'IA. Confirmer ce gros lot ?'))return;
+  closeMo();
+  const ok=await retraiter(cles,m,window._rfFour);
+  if(ok)toast('🔄 '+cles.length+' facture(s) en file de relecture — comptez ~30 s par facture, puis « ↻ Tout recharger »',8000);}
 /* ── 📤 Import Sage ── */
 let impFourn=new Set(),impSel=new Set(),impVoirExclues=false;
 function candidatsImport(){
@@ -822,7 +851,7 @@ function tableImport(vis){
      return `<tr style="${c.ko.length?'background:#fffbf5':''}">
       <td><input type="checkbox" ${impSel.has(c.f.CleUnique)?'checked':''} ${c.ko.length?'disabled':''}
           onchange="if(this.checked)impSel.add('${esc(c.f.CleUnique)}');else impSel.delete('${esc(c.f.CleUnique)}');rendre()"></td>
-      <td class="mono" style="font-weight:600">${esc(c.f.NumeroFacture||'—')} ${/avoir/i.test(c.f.Typededocument||'')?'<span class="tag r">AVOIR</span>':''}</td>
+      <td class="mono" style="font-weight:600">${esc(c.f.NumeroFacture||'—')} ${tagDoc(c.f)}</td>
       <td>${esc(c.f.Fournisseur||'—')}</td>
       <td class="mono" style="font-size:11px" title="${esc(c.g&&c.g.tiers||'')}">${esc(c.g&&c.g.aux||'—')}</td>
       <td>${fd(c.f.DateFacture)}</td>
@@ -974,7 +1003,7 @@ function vDB(){
        </span></div>
      <table style="font-size:12px"><thead><tr><th>Type</th><th>Date facture</th><th class="dr">TTC lu</th><th>Statut</th><th>Créée le</th><th></th></tr></thead><tbody>
       ${x.g.map(f=>`<tr>
-        <td>${/avoir/i.test(f.Typededocument||'')?'<span class="tag r">AVOIR</span>':'<span class="tag b">Facture</span>'}</td>
+        <td>${tagDoc(f)||'<span class="tag b">Facture</span>'}</td>
         <td>${fd(f.DateFacture)}</td><td class="dr">${fa(pa(f.TotalTTC))} €</td>
         <td>${esc(f.Statut||'—')}</td><td>${fd(f.Created)}</td>
         <td><button class="b" onclick="ouvrirFiche('${esc(f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')}
@@ -1015,11 +1044,12 @@ let ttQ='';
 function vTT(){
   const $=document.getElementById('vue');
   const q=ttQ.toLowerCase();
-  const fac=rows.filter(f=>dansPer(f.DateFacture)&&(!q||
-    String(f.NumeroFacture||'').toLowerCase().includes(q)||
-    String(f.Fournisseur||'').toLowerCase().includes(q)||
-    String(f.SIRET||'').includes(q)))
+  const matchQ=f=>!q||String(f.NumeroFacture||'').toLowerCase().includes(q)||
+    String(f.Fournisseur||'').toLowerCase().includes(q)||String(f.SIRET||'').includes(q);
+  const tousQ=rows.filter(matchQ);
+  const fac=tousQ.filter(f=>dansPer(f.DateFacture))
     .sort((a,b)=>String(b.DateFacture||'').localeCompare(String(a.DateFacture||'')));
+  const horsPer=q?tousQ.length-fac.length:0;
   const R=sage&&lignes?rapprocher():null;
   const okSet=R?new Set(R.ok.map(x=>x.f.CleUnique)):null;
   const ecMap=R?new Map(R.ecarts.map(x=>[x.f.CleUnique,x.ecart])):null;
@@ -1035,13 +1065,14 @@ function vTT(){
    ${barrePer()}
    <div class="barre"><input type="text" placeholder="🔎 n° facture, fournisseur, SIREN…" value="${esc(ttQ)}"
      style="flex:1;max-width:380px" oninput="ttQ=this.value;clearTimeout(window._tq);window._tq=setTimeout(rendre,250)">
-     <span style="font-size:11.5px;color:var(--g400)">${fac.length} facture(s)</span></div>
+     <span style="font-size:11.5px;color:var(--g400)">${fac.length} facture(s)</span>
+     ${horsPer>0?`<button class="b" onclick="perPreset('')">+ ${horsPer} hors période — tout afficher</button>`:''}</div>
    <div class="twrap"><table><thead><tr><th>N° facture</th><th>Fournisseur</th><th>Tiers Sage</th><th>Type</th><th>Date</th><th class="dr">TTC lu</th><th>Rapprochement</th><th>Statut</th><th></th></tr></thead><tbody>
    ${fac.slice(0,300).map(f=>`<tr>
      <td class="mono" style="font-weight:600">${esc(f.NumeroFacture||'—')}</td>
      <td>${esc(f.Fournisseur||'—')}</td>
      <td>${tiersDe(f)}</td>
-     <td>${/avoir/i.test(f.Typededocument||'')?'<span class="tag r">AVOIR</span>':'Facture'}</td>
+     <td>${tagDoc(f)||'Facture'}</td>
      <td>${fd(f.DateFacture)}</td><td class="dr">${fa(pa(f.TotalTTC))} €</td>
      <td>${etat(f)}</td><td style="font-size:11px">${esc(f.Statut||'—')}</td>
      <td><button class="b" onclick="ouvrirFiche('${esc(f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')}
@@ -1079,7 +1110,7 @@ function rendreFiche(f,lg){
   const cmp=modeApp==='cible'?c.somme:Math.abs(pa(f.TotalTTC));
   const ec=rS!=null?r2(cmp-rS):null;
   document.getElementById('fiche-tags').innerHTML=
-    (/avoir/i.test(f.Typededocument||'')?'<span class="tag r">AVOIR</span> ':'')+
+    (tagDoc(f)?tagDoc(f)+' ':'')+
     (ec==null?'<span class="tag g">non rapprochée</span>':Math.abs(ec)<=0.02?'<span class="tag v">✓ juste au centime</span>':`<span class="tag o">écart ${fa(ec)} €</span>`);
   document.getElementById('fiche-actions').innerHTML=
     (String(f.LienFacture||'').startsWith('http')?`<button class="b" onclick="ouvrirPDF('${esc(f.LienFacture)}')">📄 PDF</button>`:'')+
@@ -1213,7 +1244,7 @@ function ouvrirParams(){
    </div>
    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
      <button class="b" onclick="if(confirm('Revenir aux valeurs de production ?')){PARAM_KEYS.forEach(k=>{try{localStorage.removeItem('tnc2_'+k)}catch(e){}});location.reload();}">↩︎ Valeurs d'usine</button>
-     <button class="b" onclick="idbEffacer('lignes').then(()=>{lignes=null;lignesDate=null;toast('🗑 Cache vidé — rechargement…');boot(true);closeMo();})">🗑 Vider le cache lignes</button>
+     <button class="b" onclick="idbEffacer('lignes2').then(()=>{lignes=null;lignesDate=null;toast('🗑 Cache vidé — rechargement…');boot(true);closeMo();})">🗑 Vider le cache lignes</button>
      <span style="margin-left:auto;display:flex;gap:8px">
        <button class="b" onclick="closeMo()">Annuler</button>
        <button class="b principal" onclick="sauverParams()">💾 Enregistrer</button></span>
