@@ -355,7 +355,7 @@ function barrePer(){
    <span class="lab">du</span><input type="date" value="${per.du}" onchange="perDate('du',this.value)">
    <span class="lab">au</span><input type="date" value="${per.au}" onchange="perDate('au',this.value)"></div>`;}
 /* ── Chargement des données ── */
-const CHAMPS_FACT='CleUnique,NumeroFacture,Fournisseur,SIRET,Typededocument,DateFacture,DateEcheance,TotalHT,TVA,TotalTTC,EtablissementAffecte,LienFacture,Statut';
+const CHAMPS_FACT='CleUnique,NumeroFacture,Fournisseur,SIRET,Typededocument,DateFacture,DateEcheance,TotalHT,TVA,TotalTTC,EtablissementAffecte,LienFacture,Statut,DateTraitement,Created,Modified';
 const CHAMPS_LIGNE='CleUnique,Cl_x00e9_UniqueLigne,NumeroLigne,Designation,Quantite,PUHT,MontantHT,CompteComptable,EtablissementAffecte,Mati_x00e8_re,NumBon,Chantier,DateRotation';
 
 async function chargerFactures(){
@@ -1063,12 +1063,15 @@ function vDB(){
            :`<button class="b" onclick='deciderDoublon(${JSON.stringify(x.cle)},"pas_doublon")'>✓ Pas un doublon</button>
              <button class="b" onclick='deciderDoublon(${JSON.stringify(x.cle)},"traite")'>✓ Traité</button>`}
        </span></div>
-     <table style="font-size:12px"><thead><tr><th>Type</th><th>Date facture</th><th class="dr">TTC lu</th><th>Statut</th><th>Créée le</th><th></th></tr></thead><tbody>
+     <table style="font-size:12px"><thead><tr><th>Type</th><th>Clé unique n8n</th><th>Date facture</th><th class="dr">TTC lu</th><th>Statut</th><th>Créée le</th><th>Traitée le</th><th></th></tr></thead><tbody>
       ${x.g.map(f=>`<tr>
         <td>${tagDoc(f)||'<span class="tag b">Facture</span>'}</td>
+        <td class="mono" style="font-size:10.5px;color:var(--g500)">${esc(f.CleUnique||'—')}</td>
         <td>${fd(f.DateFacture)}</td><td class="dr">${fa(pa(f.TotalTTC))} €</td>
-        <td>${esc(f.Statut||'—')}</td><td>${fd(f.Created)}</td>
-        <td><button class="b" onclick="ouvrirFiche('${esc(f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')}
+        <td>${esc(f.Statut||'—')}</td><td title="création de la fiche par le worker">${fdh(f.Created)}</td>
+        <td>${f.DateTraitement?fdh(f.DateTraitement):'—'}</td>
+        <td style="white-space:nowrap"><button class="b" onclick="ouvrirFiche('${esc(f.CleUnique)}')">Ouvrir</button>
+          <button class="b danger" title="Supprimer cette fiche et ses lignes de SharePoint" onclick="supprimerFacture('${esc(f.CleUnique)}')">🗑</button></td></tr>`).join('')}
      </tbody></table></div>`;}).join('')||'<div class="vide"><div class="gi">🎉</div><div class="gt">Aucun doublon sur la période</div></div>'}
    <div style="margin-top:16px">
      <button class="b" onclick="dbAvance=!dbAvance;rendre()">${dbAvance?'▾ Masquer':'▸ Analyses avancées'} (même montant, numéros différents)</button>
@@ -1085,6 +1088,26 @@ function analysesAvancees(){
     ${gs.map(g=>`<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--g100)">
       <b>${esc(g[0].Fournisseur||'—')}</b> · ${fa(pa(g[0].TotalTTC))} € · ${g.map(f=>`<span class="mono">${esc(f.NumeroFacture)}</span> (${fd(f.DateFacture)})`).join(' / ')}</div>`).join('')
      ||'<div style="color:var(--g400);font-size:12px">Rien à signaler.</div>'}</div>`;}
+async function supprimerFacture(cle){
+  const f=rows.find(r=>r.CleUnique===cle);if(!f)return;
+  if(etatExport(f)){toast('⛔ Facture exportée — suppression interdite (déverrouillez d\'abord)');return;}
+  let lg=lignesDe(cle);
+  if(!lg.length){try{lg=await lignesFraiches(cle);}catch(e){}}
+  if(lg.some(l=>!l.id)){toast('⛔ Identifiants de lignes incomplets — « ↻ Tout recharger » puis réessayez');return;}
+  if(!confirm(`SUPPRESSION DÉFINITIVE de SharePoint\n\n${f.NumeroFacture} — ${f.Fournisseur}\n${fa(pa(f.TotalTTC))} € TTC · ${lg.length} ligne(s) comptable(s)\nClé : ${cle}\n\nÀ réserver aux vrais doublons (même document lu deux fois). Continuer ?`))return;
+  const motif=prompt('Motif de la suppression (obligatoire, journalisé) :','Doublon de lecture — fiche en double');
+  if(!motif){toast('Suppression annulée — motif obligatoire');return;}
+  try{
+    await journaliser(cle,f.NumeroFacture||'',[{cible:'Facture',champ:'SUPPRESSION',
+      avant:`${f.Fournisseur} ${fa(pa(f.TotalTTC))}€ TTC, ${lg.length} ligne(s), créée ${fd(f.Created)}`,apres:'(supprimée)'}],motif);
+    let ko=0;
+    for(const l of lg){try{await gWrite('DELETE',`/sites/${cfg.site}/lists/${cfg.lLignes}/items/${l.id}`);}catch(e){ko++;}}
+    await gWrite('DELETE',`/sites/${cfg.site}/lists/${cfg.lFactures}/items/${f._id}`);
+    rows=rows.filter(r=>r.CleUnique!==cle);
+    if(lignes){lignes=lignes.filter(l=>String(l.CleUnique||'')!==cle);idbEcrire('lignes2',{d:lignesDate||Date.now(),l:lignes});}
+    _rap=null;rendre();
+    toast('🗑 Fiche et '+lg.length+' ligne(s) supprimées'+(ko?' — ⛔ '+ko+' ligne(s) en échec':''));
+  }catch(e){toast('⛔ Suppression : '+e.message);}}
 async function deciderDoublon(cle,type){
   const motif=type==='pas_doublon'
     ?prompt("Pourquoi n'est-ce pas un doublon ? (tracé)",'Facture + avoir / pièces distinctes')
