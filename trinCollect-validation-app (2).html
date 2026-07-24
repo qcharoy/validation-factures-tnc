@@ -616,6 +616,12 @@ const tagDoc=f=>{const t=String(f&&f.Typededocument||'');
   if(/avoir/i.test(t))return '<span class="tag r">AVOIR</span>';
   if(/rachat|bordereau/i.test(t))return '<span class="tag" style="background:var(--violet-l);color:var(--violet)">RACHAT</span>';
   return '';};
+const refTTCSage=g=>g?((g.ttc!=null&&Math.abs(g.ttc)>0.005)?Math.abs(g.ttc):(g.ht!=null?Math.abs(g.ht):null)):null;
+const duoIS=(ia,sg)=>{
+  if(sg==null)return `<span class="duo"><span class="ia">${fa(ia)}</span><span class="sep">|</span><span style="color:var(--g300)">—</span></span>`;
+  const e=r2(ia-sg);
+  return `<span class="duo"><span class="ia">${fa(ia)}</span><span class="sep">|</span><span class="sg">${fa(sg)}</span></span>
+   <span class="${Math.abs(e)<=0.02?'ecart-ok':'ecart-ko'}" style="font-size:11px">${Math.abs(e)<=0.02?'✓':fa(e)+' €'}</span>`;};
 const cleGroupe=g=>g.map(x=>x.CleUnique||'').sort().join('+').slice(0,250);
 function groupesDoublons(){
   const grp={};rows.filter(f=>dansPer(f.DateFacture)).forEach(f=>{
@@ -900,7 +906,7 @@ async function deverrouiller(cle){
 function tableImport(vis){
   return `<div class="twrap"><table><thead><tr><th style="width:30px"></th>
     <th>N° facture</th><th>Fournisseur</th><th>Tiers</th><th>Date</th>
-    <th class="dr">Σ charges IA</th><th class="dr">${libRef()}</th><th class="dr">Écart</th>
+    <th class="dr">${modeApp==='cible'?'Σ charges IA (HT)':'TTC lu (IA)'}</th><th class="dr">${libRef()}</th><th class="dr">Écart</th>
     <th>Contrôles</th><th></th></tr></thead><tbody>
    ${vis.slice(0,400).map(c=>{const rS=refSage(c.g)||0;
      const cmp=modeApp==='cible'?c.somme:Math.abs(pa(c.f.TotalTTC));const ec=r2(cmp-rS);
@@ -911,7 +917,7 @@ function tableImport(vis){
       <td>${esc(c.f.Fournisseur||'—')}</td>
       <td class="mono" style="font-size:11px" title="${esc(c.g&&c.g.tiers||'')}">${esc(c.g&&c.g.aux||'—')}</td>
       <td>${fd(c.f.DateFacture)}</td>
-      <td class="dr">${fa(c.somme)} €</td><td class="dr">${fa(rS)} €</td>
+      <td class="dr">${fa(cmp)} €</td><td class="dr">${fa(rS)} €</td>
       <td class="dr ${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</td>
       <td style="font-size:11px">${c.ko.length?c.ko.map(k=>`<div style="color:var(--rouge)">• ${esc(k)}</div>`).join(''):'<span class="tag v">✅ prête</span>'}</td>
       <td style="white-space:nowrap"><button class="b" onclick="ouvrirFiche('${esc(c.f.CleUnique)}')">Ouvrir</button>
@@ -1063,11 +1069,12 @@ function vDB(){
            :`<button class="b" onclick='deciderDoublon(${JSON.stringify(x.cle)},"pas_doublon")'>✓ Pas un doublon</button>
              <button class="b" onclick='deciderDoublon(${JSON.stringify(x.cle)},"traite")'>✓ Traité</button>`}
        </span></div>
-     <table style="font-size:12px"><thead><tr><th>Type</th><th>Clé unique n8n</th><th>Date facture</th><th class="dr">TTC lu</th><th>Statut</th><th>Créée le</th><th>Traitée le</th><th></th></tr></thead><tbody>
+     <table style="font-size:12px"><thead><tr><th>Type</th><th>Clé unique n8n</th><th>Date facture</th><th class="dr">TTC — IA | Sage</th><th>Statut</th><th>Créée le</th><th>Traitée le</th><th></th></tr></thead><tbody>
       ${x.g.map(f=>`<tr>
         <td>${tagDoc(f)||'<span class="tag b">Facture</span>'}</td>
         <td class="mono" style="font-size:10.5px;color:var(--g500)">${esc(f.CleUnique||'—')}</td>
-        <td>${fd(f.DateFacture)}</td><td class="dr">${fa(pa(f.TotalTTC))} €</td>
+        <td>${fd(f.DateFacture)}</td>
+        <td class="dr">${duoIS(Math.abs(pa(f.TotalTTC)),refTTCSage(pieceDe(f)))}</td>
         <td>${esc(f.Statut||'—')}</td><td title="création de la fiche par le worker">${fdh(f.Created)}</td>
         <td>${f.DateTraitement?fdh(f.DateTraitement):'—'}</td>
         <td style="white-space:nowrap"><button class="b" onclick="ouvrirFiche('${esc(f.CleUnique)}')">Ouvrir</button>
@@ -1155,13 +1162,14 @@ function vTT(){
      style="flex:1;max-width:380px" oninput="ttQ=this.value;clearTimeout(window._tq);window._tq=setTimeout(rendre,250)">
      <span style="font-size:11.5px;color:var(--g400)">${fac.length} facture(s)</span>
      ${horsPer>0?`<button class="b" onclick="perPreset('')">+ ${horsPer} hors période — tout afficher</button>`:''}</div>
-   <div class="twrap"><table><thead><tr><th>N° facture</th><th>Fournisseur</th><th>Tiers Sage</th><th>Type</th><th>Date</th><th class="dr">TTC lu</th><th>Rapprochement</th><th>Statut</th><th></th></tr></thead><tbody>
+   <div class="twrap"><table><thead><tr><th>N° facture</th><th>Fournisseur</th><th>Tiers Sage</th><th>Type</th><th>Date</th><th class="dr">TTC — IA | Sage</th><th>Rapprochement</th><th>Statut</th><th></th></tr></thead><tbody>
    ${fac.slice(0,300).map(f=>`<tr>
      <td class="mono" style="font-weight:600">${esc(f.NumeroFacture||'—')}</td>
      <td>${esc(f.Fournisseur||'—')}</td>
      <td>${tiersDe(f)}</td>
      <td>${tagDoc(f)||'Facture'}</td>
-     <td>${fd(f.DateFacture)}</td><td class="dr">${fa(pa(f.TotalTTC))} €</td>
+     <td>${fd(f.DateFacture)}</td>
+     <td class="dr">${duoIS(Math.abs(pa(f.TotalTTC)),refTTCSage((gMap&&gMap.get(f.CleUnique))||pieceDe(f)))}</td>
      <td>${etat(f)}</td><td style="font-size:11px">${esc(f.Statut||'—')}</td>
      <td><button class="b" onclick="ouvrirFiche('${esc(f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')}
    </tbody></table>${fac.length>300?'<div style="padding:8px;font-size:11px;color:var(--g400)">Affichage limité à 300 lignes — précisez la recherche ou la période.</div>':''}</div>`;}
@@ -1192,7 +1200,7 @@ async function lignesFraiches(cle){
   return nv.sort((a,b)=>(a.NumeroLigne||0)-(b.NumeroLigne||0));}
 function rendreFiche(f,lg){
   const R=sage&&lignes?rapprocher():null;
-  const g=R?((R.ok.find(x=>x.f===f)||R.ecarts.find(x=>x.f===f)||{}).g||null):null;
+  const g=(R?((R.ok.find(x=>x.f===f)||R.ecarts.find(x=>x.f===f)||{}).g||null):null)||pieceDe(f);
   const c=controles(f,lg,g);
   const rS=g?refSage(g):null;
   const cmp=modeApp==='cible'?c.somme:Math.abs(pa(f.TotalTTC));
