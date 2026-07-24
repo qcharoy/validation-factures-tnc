@@ -186,6 +186,7 @@ tr:hover td{background:var(--g50)}
 <div id="mvoile"><div id="modale"></div></div>
 <div id="toast"></div>
 <script>
+
 /* ═══════════════════════════════════════════════════════════════
    TRI'N'COLLECT — Imputation analytique des factures fournisseurs
    Application autonome (1 fichier). Voir le prompt de spécification
@@ -407,7 +408,7 @@ async function chargerSage(){
     // Sens comptable : si la majorité des montants est négative, on retourne tout.
     const neg=sage.filter(g=>g.ht<0).length;
     if(neg>sage.length*0.6)sage.forEach(g=>{g.ht=-g.ht;if(g.ttc!=null)g.ttc=-g.ttc;if(g.a!=null)g.a=-g.a;});
-    sageMeta={nom:f.nom,modifie:f.modifie,n:sage.length};
+    sageMeta={nom:f.nom,modifie:f.modifie,n:sage.length};_pmap=null;
   }catch(e){sage=null;sageMeta={erreur:e.message};console.warn('[sage]',e.message);}}
 
 async function chargerConsignes(){
@@ -440,15 +441,34 @@ async function journaliser(cle,num,entrees,motif){
    P2 : numéro seul → rapproché, écart SIGNALÉ (jamais masqué en « absente »).
    Plusieurs candidats non départagés → ambiguë, pas d'appariement au hasard. */
 const TOL=0.02;
-let _rap=null;
+let _rap=null,_pmap=null;
+function pieceDe(f){
+  if(!sage)return null;
+  if(!_pmap){_pmap=new Map();sage.forEach(g=>{if(g.refNorm&&!_pmap.has(g.refNorm))_pmap.set(g.refNorm,g);});}
+  return _pmap.get(numNorm(f.NumeroFacture))||null;}
+/* État d'export : verrou SharePoint (Statut) croisé avec la preuve Sage (488 soldé) */
+function etatExport(f){
+  const m=String(f.Statut||'').match(/Export[ée]\s*(\S+)?/i);
+  if(!m)return null;
+  const lot=m[1]||'?';
+  let quand=null;const dm=lot.match(/^IMP-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+  if(dm)quand=new Date(+dm[1],+dm[2]-1,+dm[3],+dm[4],+dm[5],+dm[6]);
+  const g=pieceDe(f);
+  const solde=!!(g&&g.a!=null&&Math.abs(g.a)<=TOL&&Math.abs(g.ht)>0.005);
+  const somme=r2(lignesDe(f.CleUnique).reduce((x,l)=>x+pa(l.MontantHT),0));
+  const conforme=solde?Math.abs(Math.abs(g.ht)-somme)<=TOL:null;
+  const heures=quand?(Date.now()-quand)/3600000:null;
+  return{lot,quand,solde,conforme,heures,retard:!solde&&heures!=null&&heures>48};}
 function sommeLignesHT(cle){return r2(lignesDe(cle).reduce((s,l)=>s+pa(l.MontantHT),0));}
 function rapprocher(){
   if(_rap)return _rap;
-  const fac=rows.filter(f=>dansPer(f.DateFacture));
+  const expNorm=new Set(rows.filter(f=>etatExport(f)).map(f=>numNorm(f.NumeroFacture)));
+  const fac=rows.filter(f=>dansPer(f.DateFacture)&&!etatExport(f));
   const parNorm={};fac.forEach(f=>{const n=numNorm(f.NumeroFacture);if(n)(parNorm[n]=parNorm[n]||[]).push(f);});
   const R={manquantes:[],ecarts:[],ok:[],ambigues:[],sansSage:[]};
   (sage||[]).forEach(g=>{
     if(!dansPer(g.d))return;
+    if(expNorm.has(g.refNorm))return;   // exportée : suivie dans « Lots générés », plus dans le flux
     if(modeApp==='cible'&&(g.a==null||g.a<=0.005))return;   // cible : seuls les 488 débiteurs
     const cand=parNorm[g.refNorm]||[];
     if(!cand.length){R.manquantes.push({g});return;}
@@ -775,6 +795,7 @@ function rfCles(){
   return rows.filter(f=>{const d=String(f.DateFacture||'').slice(0,10);
     return String(f.Fournisseur||'').toLowerCase().includes(four)
       &&String(f.LienFacture||'').startsWith('http')
+      &&!etatExport(f)
       &&(!du||d>=du)&&(!au||d<=au);}).map(f=>f.CleUnique);}
 function rfMaj(){
   const n=rfCles().length;
@@ -840,7 +861,42 @@ function vIM(){
      </span>
    </div>
    ${impVoirExclues?tableExclues(exclues):tableImport(vis)}
+   ${panneauLots()}
    ${lots.length?`<div style="margin-top:14px;font-size:11px;color:var(--g400)">Derniers lots générés : ${lots.slice(0,3).map(l=>l.id+' ('+l.n+' fact., '+fa(l.deb)+' €, '+l.mode+')').join(' · ')}</div>`:''}`;}
+function panneauLots(){
+  const exp=rows.map(f=>({f,e:etatExport(f)})).filter(x=>x.e);
+  if(!exp.length)return '';
+  const parLot={};exp.forEach(x=>(parLot[x.e.lot]=parLot[x.e.lot]||[]).push(x));
+  const lotsTri=Object.keys(parLot).sort().reverse();
+  const etat=x=>x.e.solde
+    ?(x.e.conforme?'<span class="tag v">✅ confirmé dans Sage</span>':'<span class="tag o">⚠️ intégré, montant différent</span>')
+    :(x.e.retard?'<span class="tag r">🔴 non intégré depuis '+Math.floor(x.e.heures/24)+' j</span>':'<span class="tag b">⏳ en attente d\'intégration</span>');
+  return `<h1 style="font-size:14px;margin:18px 0 4px">📦 Lots générés (${exp.length} facture(s))</h1>
+   <div class="sous">Verrou partagé : ces factures sont sorties du flux. « Confirmé » = compte 488600 soldé dans l'export Sage du matin.</div>
+   ${lotsTri.map(lot=>{const L=parLot[lot];
+     const conf=L.filter(x=>x.e.solde).length;
+     return `<div style="border:1px solid var(--g200);border-radius:9px;margin-bottom:8px;overflow:hidden">
+      <div style="background:var(--g50);padding:7px 12px;font-size:12px;display:flex;gap:10px;align-items:center">
+        <b>${esc(lot)}</b>${L[0].e.quand?' · généré le '+fdh(L[0].e.quand):''} · ${L.length} facture(s)
+        <span class="tag ${conf===L.length?'v':'b'}">${conf}/${L.length} confirmée(s)</span></div>
+      <table style="font-size:12px"><tbody>
+      ${L.map(x=>`<tr><td class="mono" style="width:170px">${esc(x.f.NumeroFacture||'—')}</td>
+        <td>${esc(x.f.Fournisseur||'—')}</td>
+        <td class="dr" style="width:110px">${fa(pa(x.f.TotalHT))} €</td>
+        <td style="width:230px">${etat(x)}</td>
+        <td style="width:210px;white-space:nowrap"><button class="b" onclick="ouvrirFiche('${esc(x.f.CleUnique)}')">Ouvrir</button>
+          ${x.e.solde?'':`<button class="b danger" onclick="deverrouiller('${esc(x.f.CleUnique)}')">↩️ Regénérer</button>`}</td></tr>`).join('')}
+      </tbody></table></div>`;}).join('')}`;}
+async function deverrouiller(cle){
+  const f=rows.find(r=>r.CleUnique===cle);if(!f)return;
+  const e=etatExport(f);
+  const m=prompt(`Autoriser une NOUVELLE génération de « ${f.NumeroFacture} » ?\nLot d'origine : ${e?e.lot:'?'} — à faire uniquement si le fichier n'a pas été (et ne sera pas) intégré dans Sage.\nMotif (journalisé) :`,'Fichier non intégré — regénération');
+  if(m===null)return;
+  try{await gWrite('PATCH',`/sites/${cfg.site}/lists/${cfg.lFactures}/items/${f._id}/fields`,{Statut:'À traiter'});
+    f.Statut='À traiter';
+    journaliser(cle,f.NumeroFacture,[{cible:'Facture',champ:'Déverrouillage export',avant:e?e.lot:'',apres:'À traiter'}],m);
+    _rap=null;rendre();toast('↩️ Facture remise dans le flux — regénérable');}
+  catch(err){toast('⛔ '+err.message);}}
 function tableImport(vis){
   return `<div class="twrap"><table><thead><tr><th style="width:30px"></th>
     <th>N° facture</th><th>Fournisseur</th><th>Tiers</th><th>Date</th>
@@ -903,6 +959,12 @@ function genererFichier(){
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=id+(modeApp==='test'?'-TEST':'')+'.csv';a.click();
   lots.unshift({id,date:new Date().toLocaleString('fr-FR'),user:moi(),n:sel.length,deb:t.deb,mode:modeApp});
   lots=lots.slice(0,30);lss('tnc2_lots',JSON.stringify(lots));
+  (async()=>{let ko=0;
+    for(const c of sel){try{
+      await gWrite('PATCH',`/sites/${cfg.site}/lists/${cfg.lFactures}/items/${c.f._id}/fields`,{Statut:'Exporté '+id});
+      c.f.Statut='Exporté '+id;}catch(e){ko++;}}
+    _rap=null;rendre();
+    if(ko)toast('⚠️ '+ko+' facture(s) non verrouillée(s) dans SharePoint — risque de double lot',7000);})();
   journaliser('LOT|'+id,'',sel.map(c=>({cible:'Facture '+(c.f.NumeroFacture||''),champ:'Import Sage',avant:'',apres:id})),
     'Génération fichier import — mode '+modeApp);
   toast(`📤 ${id} — ${sel.length} facture(s), ${lg.length} lignes, ${fa(t.deb)} € équilibrés`);
@@ -1056,7 +1118,10 @@ function vTT(){
   const gMap=R?new Map([...R.ok,...R.ecarts].map(x=>[x.f.CleUnique,x.g])):null;
   const tiersDe=f=>{const g=gMap&&gMap.get(f.CleUnique);
     return g?`<span class="mono">${esc(g.aux||'—')}</span> <span style="color:var(--g400);font-size:11px">${esc(g.tiers||'')}</span>`:'—';};
-  const etat=f=>{if(!R)return '';
+  const etat=f=>{
+    const ee=etatExport(f);
+    if(ee)return ee.solde?'<span class="tag v">📦 importée ✓</span>':'<span class="tag b">📦 exportée</span>';
+    if(!R)return '';
     if(okSet.has(f.CleUnique))return '<span class="tag v">✓ juste</span>';
     if(ecMap.has(f.CleUnique))return `<span class="tag o">écart ${fa(ecMap.get(f.CleUnique))} €</span>`;
     return '<span class="tag g">hors Sage</span>';};
@@ -1109,7 +1174,9 @@ function rendreFiche(f,lg){
   const rS=g?refSage(g):null;
   const cmp=modeApp==='cible'?c.somme:Math.abs(pa(f.TotalTTC));
   const ec=rS!=null?r2(cmp-rS):null;
+  const eex=etatExport(f);
   document.getElementById('fiche-tags').innerHTML=
+    (eex?`<span class="tag b">📦 ${esc(eex.lot)}</span> ${eex.solde?(eex.conforme?'<span class="tag v">✅ confirmé Sage</span>':'<span class="tag o">⚠️ montant différent</span>'):(eex.retard?'<span class="tag r">🔴 non intégré</span>':'<span class="tag b">⏳ attente Sage</span>')} `:'')+
     (tagDoc(f)?tagDoc(f)+' ':'')+
     (ec==null?'<span class="tag g">non rapprochée</span>':Math.abs(ec)<=0.02?'<span class="tag v">✓ juste au centime</span>':`<span class="tag o">écart ${fa(ec)} €</span>`);
   document.getElementById('fiche-actions').innerHTML=
@@ -1199,6 +1266,8 @@ async function sauverFiche(){
   rendreFiche(f,lg);rendre();}
 function retraiterUne(cle){
   const f=rows.find(x=>x.CleUnique===cle);if(!f)return;
+  const ee=etatExport(f);
+  if(ee){toast('⛔ Facture exportée ('+ee.lot+') — le worker écraserait le verrou. Déverrouillez d\'abord (Import Sage → Lots générés).',7000);return;}
   if(!String(f.LienFacture||'').startsWith('http')){toast('Pas de PDF lié — retraitement impossible');return;}
   const m=prompt('Motif du retraitement (journalisé) :','Consigne corrigée — relecture');
   if(m!==null)retraiter([cle],m,f.Fournisseur||'');}
