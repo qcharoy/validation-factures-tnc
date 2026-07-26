@@ -211,6 +211,7 @@ const CFG_DEF={
   sgdrive:'b!J20wOzPDwU-SEZ94ic-HacYp0dSd7HFKruMFfBby2LdmJePb8HkcQKP4GhpGqEY9',
   sgpath:'/Sage/sage-achats.json',
   whSage:'https://tri-n-collect.app.n8n.cloud/webhook/832f7dd6-94eb-4fe4-b437-2d75ee74607d',
+  cleApi:'',   /* clé partagée n8n — saisie dans ⚙️ Paramètres, jamais dans le fichier publié */
   whChercher:'https://tri-n-collect.app.n8n.cloud/webhook/chercher-absentes',
   whTraiter:'https://tri-n-collect.app.n8n.cloud/webhook/traiter-email',
   whRetraiter:'https://tri-n-collect.app.n8n.cloud/webhook/retraiter',
@@ -224,7 +225,8 @@ function setCfg(k,v){lss('tnc2_'+k,v);}
 const pa=v=>{if(v==null||v==='')return 0;return parseFloat(String(v).replace(/\s|€/g,'').replace(',','.'))||0};
 const r2=v=>Math.round(v*100)/100;
 const fa=v=>Number(v||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc=s=>String(s??'').replace(/[&<>"'`=\/]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',
+  "'":'&#39;','`':'&#96;','=':'&#61;','/':'&#47;'}[c]));
 const numNorm=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^0+/,'');
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const fd=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'})};
@@ -242,7 +244,7 @@ let msalApp=null,account=null;
 function initMsal(){msalApp=new msal.PublicClientApplication({
   auth:{clientId:cfg.cid,authority:'https://login.microsoftonline.com/'+cfg.tid,
         redirectUri:location.href.split('?')[0].split('#')[0]},
-  cache:{cacheLocation:'localStorage'}});}
+  cache:{cacheLocation:'sessionStorage'}});}
 async function connexion(){try{await msalApp.loginRedirect({scopes:['Sites.Read.All','Sites.ReadWrite.All','User.Read']});}
   catch(e){toast('⚠️ Connexion échouée : '+e.message);}}
 async function jeton(){
@@ -277,6 +279,11 @@ async function lireFichierPartage(url){ // fichier SharePoint par URL (endpoint 
     {headers:{Authorization:'Bearer '+t}});
   if(!r.ok)throw new Error('Téléchargement impossible (HTTP '+r.status+')');
   return{texte:await r.text(),nom:meta.name,modifie:meta.lastModifiedDateTime};}
+
+/* ── Appels webhooks n8n (clé partagée en en-tête) ── */
+function enTetesN8n(){const h={'Content-Type':'application/json'};
+  if(cfg.cleApi)h['x-tnc-key']=cfg.cleApi;return h;}
+const avecCle=u=>cfg.cleApi?u+(u.includes('?')?'&':'?')+'k='+encodeURIComponent(cfg.cleApi):u;
 
 /* ── Cache IndexedDB (lignes comptables) ── */
 function idb(){return new Promise((res,rej)=>{const q=indexedDB.open('tnc2',1);
@@ -548,7 +555,7 @@ async function retraiter(cles,motif,contexte){
   const lot={id:'RT-'+Date.now(),motif,utilisateur:moi(),contexte:contexte||'',
     factures:fs.map(f=>({cleUnique:f.CleUnique,numeroFacture:f.NumeroFacture,fournisseur:f.Fournisseur,
       siret:f.SIRET,lienFacture:f.LienFacture,totalHT:f.TotalHT,totalTTC:f.TotalTTC}))};
-  try{const r=await fetch(cfg.whRetraiter,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lot)});
+  try{const r=await fetch(cfg.whRetraiter,{method:'POST',headers:enTetesN8n(),body:JSON.stringify(lot)});
     if(!r.ok)throw new Error('HTTP '+r.status);
     journaliser(fs.length===1?fs[0].CleUnique:'LOT|'+lot.id,fs.length===1?fs[0].NumeroFacture:'',
       fs.map(()=>({cible:'Facture',champ:'Renvoi au worker',avant:'',apres:lot.id})),motif);
@@ -573,7 +580,7 @@ async function analyserIA(cle,ctx){
     ecart:ctx?ctx.ecart:null,
     consigneActuelle:consigne?{id:consigne._id,motif:consigne.motif,texte:consigne.texte}:null,
     utilisateur:moi()};
-  try{const r=await fetch(cfg.whAnalyse,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corps)});
+  try{const r=await fetch(cfg.whAnalyse,{method:'POST',headers:enTetesN8n(),body:JSON.stringify(corps)});
     const txt=await r.text();if(!r.ok)throw new Error('HTTP '+r.status);
     let d;try{d=JSON.parse(txt)}catch(e){d={diagnostic:txt}}
     if(Array.isArray(d))d=d[0]||{};if(d.output)d=d.output;
@@ -723,8 +730,8 @@ function vEC(){
     ${lm.map((x,i)=>`<tr><td class="mono">${esc(x.g.r)}</td><td class="mono">${esc(x.g.aux||'—')}</td><td>${esc(x.g.tiers||'—')}</td>
       <td>${fd(x.g.d)}</td><td class="dr">${fa(refSage(x.g))} €</td>
       <td style="font-size:11px;color:var(--g400)">${esc((x.g.comptes||[]).slice(0,3).join(', '))}</td>
-      <td>${String(x.g.r).trim().length>=4?`<button class="b" id="mb-${i}" onclick="chercherUne(${i})">📬 Email</button>`
-          :'<span style="font-size:10px;color:var(--g400)" title="Trop de faux positifs dans la recherche">réf. trop courte</span>'}</td></tr>`).join('')
+      <td>${String(x.g.r).trim().length>=6?`<button class="b" id="mb-${i}" onclick="chercherUne(${i})">📬 Email</button>`
+          :'<span style="font-size:10px;color:var(--g400)" title="Référence trop courte : trop de faux positifs, recherche refusée">réf. trop courte</span>'}</td></tr>`).join('')
      ||'<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:18px">Tout est lu ✅</td></tr>'}
    </tbody></table></div>`;}
 async function chercherUne(i){
@@ -732,7 +739,7 @@ async function chercherUne(i){
   const ref=String(x.g.r||'').trim();
   const b=document.getElementById('mb-'+i);
   if(b){b.disabled=true;b.textContent='⏳ Recherche…';}
-  try{const r=await fetch(cfg.whChercher,{method:'POST',headers:{'Content-Type':'application/json'},
+  try{const r=await fetch(cfg.whChercher,{method:'POST',headers:enTetesN8n(),
       body:JSON.stringify({pieces:[{ref,tiers:x.g.tiers||'',aux:x.g.aux||'',date:x.g.d||'',montant:refSage(x.g)}],utilisateur:moi()})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let d=await r.json();if(Array.isArray(d))d=d[0]||{};
@@ -757,7 +764,7 @@ async function chercherUne(i){
 async function envoyerCandidat(k){
   const c=(window._mbCands||[])[k];const ctx=window._mbCtx||{};if(!c)return;
   closeMo();
-  try{const r=await fetch(cfg.whTraiter,{method:'POST',headers:{'Content-Type':'application/json'},
+  try{const r=await fetch(cfg.whTraiter,{method:'POST',headers:enTetesN8n(),
       body:JSON.stringify({emailMessageId:c.id,ref:ctx.ref,utilisateur:moi()})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     journaliser('PIECE|'+ctx.ref,'',[{cible:'Boîte compta',champ:'Email envoyé au worker',avant:'',
@@ -1318,7 +1325,7 @@ async function histFiche(cle){
   }catch(e){z.innerHTML=`<div class="alerte">⛔ Journal inaccessible : ${esc(e.message)}</div>`;}}
 
 /* ═══ PARAMÈTRES ═══════════════════════════════════════════════ */
-const PARAM_KEYS=['sgurl','whSage','whRetraiter','whAnalyse','whChercher','whTraiter','journalImport','compte488','structure',
+const PARAM_KEYS=['cleApi','sgurl','whSage','whRetraiter','whAnalyse','whChercher','whTraiter','journalImport','compte488','structure',
   'lFactures','lLignes','lConsignes','lJournal','lDecisions'];
 function ouvrirParams(){
   const ch=(k,l)=>`<div style="margin-bottom:9px"><div style="font-size:11px;color:var(--g400);margin-bottom:2px">${l}</div>
@@ -1326,6 +1333,8 @@ function ouvrirParams(){
   openMo(`<h3>⚙️ Paramètres</h3>
    <div class="sous">Tout est pré-rempli avec les valeurs de production — ne modifiez que ce qui change.</div>
    <div style="max-height:52vh;overflow:auto;padding-right:4px">
+    <h1 style="font-size:12.5px;margin:8px 0 6px;color:var(--vert)">Sécurité</h1>
+    ${ch('cleApi','Clé partagée n8n (à demander à l\'administrateur — jamais publiée dans le code)')}
     <h1 style="font-size:12.5px;margin:8px 0 6px;color:var(--vert)">Sources de données</h1>
     ${ch('sgurl','URL du fichier Sage (facultatif — vide = emplacement standard /Sage/sage-achats.json, chargé automatiquement)')}
     ${ch('whSage','Webhook n8n — actualisation des données Sage (bouton ⟳)')}
@@ -1367,9 +1376,10 @@ async function actualiserSage(){
   // la requête part quand même : on bascule en mode « aveugle » et on
   // surveille la date du fichier sur SharePoint.
   let lance=false;
-  try{const r=await fetch(cfg.whSage,{method:'GET'});lance=r.ok;}catch(e){}
-  if(!lance){try{await fetch(cfg.whSage,{method:'GET',mode:'no-cors'});lance=true;}catch(e){}}
-  if(!lance){try{await fetch(cfg.whSage,{method:'POST',mode:'no-cors'});lance=true;}catch(e){}}
+  const uSage=avecCle(cfg.whSage);
+  try{const r=await fetch(uSage,{method:'GET'});lance=r.ok;}catch(e){}
+  if(!lance){try{await fetch(uSage,{method:'GET',mode:'no-cors'});lance=true;}catch(e){}}
+  if(!lance){try{await fetch(uSage,{method:'POST',mode:'no-cors'});lance=true;}catch(e){}}
   if(!lance){fin('⛔ Webhook injoignable — vérifiez ⚙️ Paramètres et que le workflow n8n est actif');return;}
   toast('🔄 Chaîne lancée : dataflow SAGE100 → modèle sémantique → export → dépôt. Comptez 5 à 20 min, je surveille le dépôt…',8000);
   const t0=Date.now();
