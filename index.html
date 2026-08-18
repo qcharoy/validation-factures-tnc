@@ -302,7 +302,7 @@ let lignesDate=null;    // date du cache
 let sage=null;          // pièces Sage agrégées {r,refNorm,ht,ttc,a,aux,tiers,d,s[],c[]}
 let sageMeta=null;
 let consignes=null;
-let planC=null;
+let planC=null,planN=null,planFiable=true;
 let overrides=null;  // OverrideEtablissement {_id,nom,siret,agence,actif}      // plan comptable {compte: libellé}     // consignes fournisseur
 let decisions={};       // décisions doublons (Title -> fiche)
 let vueActive='tb';
@@ -312,13 +312,13 @@ let exclusions={};try{exclusions=JSON.parse(lgs('tnc2_excl')||'{}')}catch(e){}
 let lots=[];try{lots=JSON.parse(lgs('tnc2_lots')||'[]')}catch(e){}
 let mapAna={};
 const MAP_ANA_DEF={
- '14 - Agence de Caen':'CALVAD1401','17 - Agence de La Rochelle':'CHARMA1701',
- '17 - Agence de la Rochelle':'CHARMA1701','29 - Agence de Brest':'FINIST2901',
+ '14 - Agence de Caen':'CALVAD1401','17 - Agence de La Rochelle':'CHARMA1702',
+ '17 - Agence de la Rochelle':'CHARMA1702','29 - Agence de Brest':'FINIST2901',
  '31 - Agence de Toulouse':'HAUGAR3101','33 - Agence de Bordeaux':'GIROND3301',
- '35 - Agence de Rennes':'ILLEVI3501','37 - Agence de Tours':'INDLOI3701',
- '40 - Agence de Bayonne':'LANDES4001','44 - Agence de Nantes Nord':'LOIREA4403',
+ '35 - Agence de Rennes':'ILLEVI3502','37 - Agence de Tours':'INDLOI3701',
+ '40 - Agence de Bayonne':'LANDES4002','44 - Agence de Nantes Nord':'LOIREA4403',
  '44 - Agence de Nantes Sud':'LOIREA4402',"45 - Agence d'Orléans":'LOIRET4501',
- "49 - Agence d'Angers":'MAINEL4901','56 - Agence de Lorient':'MORBIH5601',
+ "49 - Agence d'Angers":'MAINEL4902','56 - Agence de Lorient':'MORBIH5601',
  '56 - Agence de Vannes':'MORBIH5602','59 - Agence de Lille':'NORDXX5901',
  '85 - Agence de la Roche sur Yon':'VENDEE8502','93 - Agence de Paris Nord Est':'SEINED9301',
  '94 - Agence de Paris Sud Est':'VALDEM9401','DS - Agence de déconstruction sélective':'DECONS0000',
@@ -435,7 +435,7 @@ async function chargerOverrides(){
   catch(e){overrides=[];console.warn('[override]',e.message);}}
 async function chargerPlan(){
   try{const c=JSON.parse(lgs('tnc2_plan')||'null');
-    if(c&&c.t&&Date.now()-c.t<24*3600*1000&&c.m&&Object.keys(c.m).length>50){planC=c.m;return;}}catch(e){}
+    if(c&&c.t&&Date.now()-c.t<24*3600*1000&&c.m&&Object.keys(c.m).length>50){planC=c.m;indexerPlan();return;}}catch(e){}
   try{
     const items=await gTout(`/sites/${cfg.site}/lists/PlanComptable/items?$expand=fields&$top=999`);
     const m={};
@@ -448,7 +448,26 @@ async function chargerPlan(){
       if(cpt)m[cpt]=lib||'';}
     if(Object.keys(m).length>50){planC=m;lss('tnc2_plan',JSON.stringify({t:Date.now(),m}));}
     else{planC={};console.warn('[plan] liste PlanComptable vide ou illisible');}
-  }catch(e){planC={};console.warn('[plan]',e.message);}}
+  }catch(e){planC={};console.warn('[plan]',e.message);}
+  indexerPlan();}
+const normCpt=c=>String(c||'').replace(/\D/g,'').replace(/0+$/,'');
+function indexerPlan(){planN={};if(!planC)return;
+  for(const[k,v]of Object.entries(planC)){const n=normCpt(k);if(n&&!(n in planN))planN[n]=v;}}
+/* null = plan non chargé · false = compte introuvable · string = libellé */
+function cptConnu(c){
+  if(!planC||!Object.keys(planC).length)return null;
+  const k=String(c||'').trim();if(!k)return null;
+  if(k in planC)return planC[k]||'';
+  if(!planN)indexerPlan();
+  const n=normCpt(k);
+  return(n&&n in planN)?(planN[n]||''):false;}
+function evaluerPlan(){ // fusible : liste incohérente → alerte au lieu de blocage
+  if(!planC||!Object.keys(planC).length||!lignes||!lignes.length)return;
+  const cs=[...new Set(lignes.map(l=>String(l.CompteComptable||'').trim()).filter(Boolean))];
+  if(cs.length<5)return;
+  const unk=cs.filter(c=>cptConnu(c)===false).length;
+  planFiable=unk/cs.length<=0.3;
+  if(!planFiable)console.warn(`[plan] ${unk}/${cs.length} comptes utilisés introuvables dans PlanComptable — contrôle rétrogradé en alerte, vérifiez la liste`);}
 async function chargerConsignes(){
   try{const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lConsignes}/items?$expand=fields&$top=500`);
     consignes=items.map(it=>{const r=it.fields||{};return{_id:it.id,
@@ -547,10 +566,10 @@ function controles(f,lg,g){
   const somme=r2(lg.reduce((s,l)=>s+pa(l.MontantHT),0));
   if(modeApp==='cible'&&g&&g.a!=null&&Math.abs(somme-Math.abs(g.a))>TOL)
     ko.push(`Σ charges ${fa(somme)} € ≠ 488600 ${fa(Math.abs(g.a))} € — Sage refusera`);
-  if(planC&&Object.keys(planC).length){
-    const abs=[...new Set(lg.map(l=>String(l.CompteComptable||'').trim()).filter(c=>c&&!(c in planC)))];
-    if(abs.length)ko.push(abs.length+' compte(s) absent(s) du plan comptable : '+abs.slice(0,3).join(', '));}
   const warn=[];
+  if(planC&&Object.keys(planC).length){
+    const abs=[...new Set(lg.map(l=>String(l.CompteComptable||'').trim()).filter(c=>c&&cptConnu(c)===false))];
+    if(abs.length)(planFiable?ko:warn).push(abs.length+' compte(s) absent(s) du plan comptable : '+abs.slice(0,3).join(', ')+(planFiable?'':' (liste PlanComptable à vérifier)'));}
   const d=anaDiff(f,lg,g);
   if(d&&!d.ok)warn.push('imputation ≠ Sage — IA : '+d.iaHors.join(', ')+' · Sage : '+d.sage.join(', '));
   return{ko,warn,somme};}
@@ -1395,9 +1414,11 @@ function majEntete(champ,val){
   const b=document.getElementById('fsave');if(b){b.disabled=!n;b.textContent=`💾 Enregistrer (${n})`;}}
 function ouvrirPDF(u){window.open(u,'tncpdf','popup=yes,width=1000,height=1000,left=60,top=30');}
 function libCompteHtml(c){
-  if(!planC||!Object.keys(planC).length)return'';
-  const k=String(c||'').trim();if(!k)return'';
-  return(k in planC)?esc(planC[k]||''):'<span style="color:var(--rouge)">⛔ absent du plan comptable</span>';}
+  const r=cptConnu(c);
+  if(r===null)return'';
+  if(r===false)return planFiable?'<span style="color:var(--rouge)">⛔ absent du plan comptable</span>'
+                                :'<span style="color:var(--orange)">non trouvé (plan à vérifier)</span>';
+  return esc(r);}
 function propagerAgence(){
   const v=(document.getElementById('ag-tous')||{}).value;
   if(!v){toast('Choisissez d\'abord l\'agence à appliquer');return;}
@@ -1556,6 +1577,7 @@ async function boot(force){
   ]);
   rendre();
   await chargerLignes(force).catch(e=>toast('⛔ Lignes : '+e.message));
+  evaluerPlan();
   _rap=null;rendre();}
 window.addEventListener('load',async()=>{
   try{
