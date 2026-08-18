@@ -300,7 +300,8 @@ let lignes=null;        // toutes les lignes comptables
 let lignesDate=null;    // date du cache
 let sage=null;          // pièces Sage agrégées {r,refNorm,ht,ttc,a,aux,tiers,d,s[],c[]}
 let sageMeta=null;
-let consignes=null;     // consignes fournisseur
+let consignes=null;
+let planC=null;      // plan comptable {compte: libellé}     // consignes fournisseur
 let decisions={};       // décisions doublons (Title -> fiche)
 let vueActive='tb';
 let modeApp=lgs('tnc2_mode')||'test';
@@ -377,18 +378,22 @@ async function chargerLignes(forcer){
       if(Date.now()-c.d>6*3600*1000)rafraichirLignesFond();
       return lignes;}}
   const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lLignes}/items?$expand=fields($select=${CHAMPS_LIGNE})&$top=999`);
-  lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));lignesDate=Date.now();
+  lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));_lidx=null;lignesDate=Date.now();
   idbEcrire('lignes2',{d:lignesDate,l:lignes});
   return lignes;}
 let _refond=false;
 async function rafraichirLignesFond(){if(_refond)return;_refond=true;
   try{const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lLignes}/items?$expand=fields($select=${CHAMPS_LIGNE})&$top=999`);
-    lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));lignesDate=Date.now();
+    lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));_lidx=null;lignesDate=Date.now();
     idbEcrire('lignes2',{d:lignesDate,l:lignes});_rap=null;
     toast('🗄️ Lignes comptables mises à jour ('+lignes.length.toLocaleString('fr-FR')+')');rendre();}
   catch(e){console.warn('[cache]',e.message);}_refond=false;}
-function lignesDe(cle){return(lignes||[]).filter(l=>l.CleUnique===cle)
-  .sort((a,b)=>(a.NumeroLigne||0)-(b.NumeroLigne||0));}
+function lignesDe(cle){
+  if(!lignes)return[];
+  if(!_lidx){_lidx=new Map();
+    lignes.forEach(l=>{const k=l.CleUnique;if(!_lidx.has(k))_lidx.set(k,[]);_lidx.get(k).push(l);});
+    _lidx.forEach(a=>a.sort((x,y)=>(x.NumeroLigne||0)-(y.NumeroLigne||0)));}
+  return _lidx.get(cle)||[];}
 
 async function metaSage(){
   if(cfg.sgurl){const enc=btoa(unescape(encodeURIComponent(cfg.sgurl))).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
@@ -418,6 +423,22 @@ async function chargerSage(){
     sageMeta={nom:f.nom,modifie:f.modifie,n:sage.length};_pmap=null;
   }catch(e){sage=null;sageMeta={erreur:e.message};console.warn('[sage]',e.message);}}
 
+async function chargerPlan(){
+  try{const c=JSON.parse(lgs('tnc2_plan')||'null');
+    if(c&&c.t&&Date.now()-c.t<24*3600*1000&&c.m&&Object.keys(c.m).length>50){planC=c.m;return;}}catch(e){}
+  try{
+    const items=await gTout(`/sites/${cfg.site}/lists/PlanComptable/items?$expand=fields&$top=999`);
+    const m={};
+    for(const it of items){const fl=it.fields||{};let cpt=null,lib=null;
+      for(const[k,v]of Object.entries(fl)){
+        if(k==='id'||k.startsWith('_')||k.startsWith('@'))continue;
+        const sv=String(v??'').trim();if(!sv)continue;
+        if(!cpt&&/^\d{5,10}$/.test(sv))cpt=sv;
+        else if(!lib&&/[A-Za-zÀ-ÿ]{3}/.test(sv)&&sv!=='Élément')lib=sv;}
+      if(cpt)m[cpt]=lib||'';}
+    if(Object.keys(m).length>50){planC=m;lss('tnc2_plan',JSON.stringify({t:Date.now(),m}));}
+    else{planC={};console.warn('[plan] liste PlanComptable vide ou illisible');}
+  }catch(e){planC={};console.warn('[plan]',e.message);}}
 async function chargerConsignes(){
   try{const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lConsignes}/items?$expand=fields&$top=500`);
     consignes=items.map(it=>{const r=it.fields||{};return{_id:it.id,
@@ -448,11 +469,20 @@ async function journaliser(cle,num,entrees,motif){
    P2 : numéro seul → rapproché, écart SIGNALÉ (jamais masqué en « absente »).
    Plusieurs candidats non départagés → ambiguë, pas d'appariement au hasard. */
 const TOL=0.02;
-let _rap=null,_pmap=null;
+let _rap=null,_pmap=null,_lidx=null;
 function pieceDe(f){
   if(!sage)return null;
   if(!_pmap){_pmap=new Map();sage.forEach(g=>{if(g.refNorm&&!_pmap.has(g.refNorm))_pmap.set(g.refNorm,g);});}
   return _pmap.get(numNorm(f.NumeroFacture))||null;}
+/* Comparaison analytique IA vs Sage (codes de sections, pas de montants dans l'export) */
+function anaDiff(f,lg,g){
+  g=g||pieceDe(f);if(!g)return null;
+  const sage=(g.sections||[]).filter(Boolean);
+  if(!sage.length)return null;                    // pièce Sage sans analytique (ex. 488 seul) : pas comparable
+  const ia=[...new Set((lg||lignesDe(f.CleUnique)).map(l=>sectionDe(l.EtablissementAffecte)).filter(Boolean))];
+  if(!ia.length)return null;
+  const iaHors=ia.filter(x=>!sage.includes(x));
+  return{ia,sage,iaHors,ok:!iaHors.length};}
 /* État d'export : verrou SharePoint (Statut) croisé avec la preuve Sage (488 soldé) */
 function etatExport(f){
   const m=String(f.Statut||'').match(/Export[ée]\s*(\S+)?/i);
@@ -507,7 +537,13 @@ function controles(f,lg,g){
   const somme=r2(lg.reduce((s,l)=>s+pa(l.MontantHT),0));
   if(modeApp==='cible'&&g&&g.a!=null&&Math.abs(somme-Math.abs(g.a))>TOL)
     ko.push(`Σ charges ${fa(somme)} € ≠ 488600 ${fa(Math.abs(g.a))} € — Sage refusera`);
-  return{ko,somme};}
+  if(planC&&Object.keys(planC).length){
+    const abs=[...new Set(lg.map(l=>String(l.CompteComptable||'').trim()).filter(c=>c&&!(c in planC)))];
+    if(abs.length)ko.push(abs.length+' compte(s) absent(s) du plan comptable : '+abs.slice(0,3).join(', '));}
+  const warn=[];
+  const d=anaDiff(f,lg,g);
+  if(d&&!d.ok)warn.push('imputation ≠ Sage — IA : '+d.iaHors.join(', ')+' · Sage : '+d.sage.join(', '));
+  return{ko,warn,somme};}
 
 /* ── Construction des écritures d'import (488 → G → A, regroupées) ── */
 const COLS='JOURNAL;Date comptable;N° de facture ;N° compte general;N° compte tiers;Libellé écriture;N° ;N° section ;Débit ;Crédit ;Type';
@@ -707,6 +743,16 @@ function vEC(){
     <div class="carte cr"><div class="v">${R.manquantes.length}</div><div class="l">Non lues par l'IA</div><div class="e">présentes dans Sage seulement</div></div>
     <div class="carte cv"><div class="v">${R.ok.length}</div><div class="l">Justes au centime</div><div class="e">aucune action</div></div>
    </div>
+   ${(()=>{const anas=[...R.ok,...R.ecarts].map(x=>({x,d:anaDiff(x.f,lignesDe(x.f.CleUnique),x.g)})).filter(y=>y.d&&!y.d.ok);
+     window._anasN=anas.length;
+     return anas.length?`<h1 style="font-size:14px;margin-bottom:6px">Imputation analytique différente de Sage (${anas.length})</h1>
+      <div class="sous">Montants cohérents mais sections différentes — alerte seulement. Cas typique : double code d'agence (Bayonne 4001/4002).</div>
+      <div class="twrap" style="margin-bottom:18px"><table><thead><tr><th>N° pièce</th><th>Fournisseur</th><th>Sections IA</th><th>Sections Sage</th><th></th></tr></thead><tbody>
+      ${anas.slice(0,100).map(y=>`<tr><td class="mono">${esc(y.x.g.r)}</td><td>${esc(y.x.f.Fournisseur||'—')}</td>
+        <td>${y.d.ia.map(sc=>`<span class="tag ${y.d.iaHors.includes(sc)?'o':'g'}" style="margin-right:3px">${esc(sc)}</span>`).join('')}</td>
+        <td>${y.d.sage.map(sc=>`<span class="tag g" style="margin-right:3px">${esc(sc)}</span>`).join('')}</td>
+        <td><button class="b" onclick="ouvrirFiche('${esc(y.x.f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')}
+      </tbody></table></div>`:''})()}
    <h1 style="font-size:14px;margin-bottom:6px">Écarts de montant (${le.length})</h1>
    <div class="twrap" style="margin-bottom:18px"><table><thead><tr>
      <th>N° pièce</th><th>Fournisseur</th><th>Tiers Sage (CT_Num)</th><th class="dr">Montant IA</th><th class="dr">Montant Sage</th><th class="dr">Écart</th><th></th></tr></thead><tbody>
@@ -832,7 +878,7 @@ function candidatsImport(){
     const lg=lignesDe(x.f.CleUnique);
     const c=controles(x.f,lg,x.g);
     if(x.ecart)c.ko.unshift(`écart ${libRef()} de ${fa(x.ecart)} €`);
-    return{f:x.f,g:x.g,lg,ko:c.ko,somme:c.somme,exclu:!!exclusions[x.f.CleUnique],
+    return{f:x.f,g:x.g,lg,ko:c.ko,warn:c.warn||[],somme:c.somme,exclu:!!exclusions[x.f.CleUnique],
            deja:/Export/i.test(String(x.f.Statut||''))};
   }).filter(c=>!c.deja);}
 function vIM(){
@@ -926,7 +972,9 @@ function tableImport(vis){
       <td>${fd(c.f.DateFacture)}</td>
       <td class="dr">${fa(cmp)} €</td><td class="dr">${fa(rS)} €</td>
       <td class="dr ${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</td>
-      <td style="font-size:11px">${c.ko.length?c.ko.map(k=>`<div style="color:var(--rouge)">• ${esc(k)}</div>`).join(''):'<span class="tag v">✅ prête</span>'}</td>
+      <td style="font-size:11px">${c.ko.map(k=>`<div style="color:var(--rouge)">• ${esc(k)}</div>`).join('')
+        +(c.warn||[]).map(w=>`<div style="color:var(--orange)">• ${esc(w)}</div>`).join('')
+        +(!c.ko.length&&!(c.warn||[]).length?'<span class="tag v">✅ prête</span>':'')}</td>
       <td style="white-space:nowrap"><button class="b" onclick="ouvrirFiche('${esc(c.f.CleUnique)}')">Ouvrir</button>
         <button class="b" title="Exclure de l'import" onclick="exclure('${esc(c.f.CleUnique)}')">🚫</button></td>
      </tr>`;}).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--g400);padding:20px">Aucune facture éligible sur ce périmètre</td></tr>'}
@@ -1118,7 +1166,7 @@ async function supprimerFacture(cle){
     for(const l of lg){try{await gWrite('DELETE',`/sites/${cfg.site}/lists/${cfg.lLignes}/items/${l.id}`);}catch(e){ko++;}}
     await gWrite('DELETE',`/sites/${cfg.site}/lists/${cfg.lFactures}/items/${f._id}`);
     rows=rows.filter(r=>r.CleUnique!==cle);
-    if(lignes){lignes=lignes.filter(l=>String(l.CleUnique||'')!==cle);idbEcrire('lignes2',{d:lignesDate||Date.now(),l:lignes});}
+    if(lignes){lignes=lignes.filter(l=>String(l.CleUnique||'')!==cle);_lidx=null;idbEcrire('lignes2',{d:lignesDate||Date.now(),l:lignes});}
     _rap=null;rendre();
     toast('🗑 Fiche et '+lg.length+' ligne(s) supprimées'+(ko?' — ⛔ '+ko+' ligne(s) en échec':''));
   }catch(e){toast('⛔ Suppression : '+e.message);}}
@@ -1159,8 +1207,10 @@ function vTT(){
     const ee=etatExport(f);
     if(ee)return ee.solde?'<span class="tag v">📦 importée ✓</span>':'<span class="tag b">📦 exportée</span>';
     if(!R)return '';
-    if(okSet.has(f.CleUnique))return '<span class="tag v">✓ juste</span>';
-    if(ecMap.has(f.CleUnique))return `<span class="tag o">écart ${fa(ecMap.get(f.CleUnique))} €</span>`;
+    const d=anaDiff(f,null,(gMap&&gMap.get(f.CleUnique))||pieceDe(f));
+    const ana=d&&!d.ok?` <span class="tag o" title="IA : ${esc(d.ia.join(', '))} — Sage : ${esc(d.sage.join(', '))}">⚠ ana</span>`:'';
+    if(okSet.has(f.CleUnique))return '<span class="tag v">✓ juste</span>'+ana;
+    if(ecMap.has(f.CleUnique))return `<span class="tag o">écart ${fa(ecMap.get(f.CleUnique))} €</span>`+ana;
     return '<span class="tag g">hors Sage</span>';};
   $.innerHTML=`<h1>📁 Toutes les factures</h1>
    <div class="sous">Recherche libre — cliquez sur une ligne pour ouvrir la fiche et corriger.</div>
@@ -1203,12 +1253,13 @@ async function lignesFraiches(cle){
     const r=await fetch(url,{headers:{Authorization:'Bearer '+t,Prefer:'HonorNonIndexedQueriesWarningMayFailRandomly'}});
     if(!r.ok)break;const d=await r.json();acc.push(...(d.value||[]));url=d['@odata.nextLink']||null;}
   const nv=acc.map(x=>({...x.fields,id:x.id}));
-  if(lignes&&nv.length){lignes=lignes.filter(l=>String(l.CleUnique||'')!==cle).concat(nv);_rap=null;}
+  if(lignes&&nv.length){lignes=lignes.filter(l=>String(l.CleUnique||'')!==cle).concat(nv);_lidx=null;_rap=null;}
   return nv.sort((a,b)=>(a.NumeroLigne||0)-(b.NumeroLigne||0));}
 function rendreFiche(f,lg){
   const R=sage&&lignes?rapprocher():null;
   const g=(R?((R.ok.find(x=>x.f===f)||R.ecarts.find(x=>x.f===f)||{}).g||null):null)||pieceDe(f);
   const c=controles(f,lg,g);
+  const dAna=anaDiff(f,lg,g);
   const rS=g?refSage(g):null;
   const cmp=modeApp==='cible'?c.somme:Math.abs(pa(f.TotalTTC));
   const ec=rS!=null?r2(cmp-rS):null;
@@ -1237,17 +1288,20 @@ function rendreFiche(f,lg){
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
      ${g&&g.aux?gi('Tiers Sage (CT_Num)','<span class="mono">'+esc(g.aux)+'</span>'+(g.tiers?' · '+esc(g.tiers):'')):''}
    </div>
-   ${c.ko.length?`<div class="alerte">⚠️ ${c.ko.map(esc).join(' · ')}</div>`:'<div class="info" style="padding:7px 11px">✅ Tous les contrôles passent.</div>'}
+   ${c.ko.length?`<div class="alerte">⚠️ ${c.ko.map(esc).join(' · ')}</div>`:''}
+   ${(c.warn||[]).length?`<div class="alerte" style="border-left-color:var(--orange);background:var(--orange-l);color:#7a5200">🟠 ${(c.warn||[]).map(esc).join(' · ')} — alerte seulement, n'empêche pas l'import</div>`:''}
+   ${!c.ko.length&&!(c.warn||[]).length?'<div class="info" style="padding:7px 11px">✅ Tous les contrôles passent.</div>':''}
    <h1 style="font-size:13.5px;margin:12px 0 6px">Lignes analytiques (${lg.length}) — modifiables, motif obligatoire</h1>
    <div class="twrap"><table style="font-size:12px"><thead><tr>
      <th>Désignation</th><th style="width:110px">Compte</th><th style="width:230px">Agence → section</th><th class="dr" style="width:100px">Montant HT</th></tr></thead><tbody>
     ${lg.map((l,i)=>{const sec=sectionDe(l.EtablissementAffecte);return `<tr>
       <td style="font-size:11.5px">${esc(l.Designation||'—')}${l.Mati_x00e8_re?`<br><span style="color:var(--g400)">${esc(l.Mati_x00e8_re)}</span>`:''}</td>
-      <td><input class="mono" style="width:100px" value="${esc(l.CompteComptable||'')}" onchange="majLigne(${i},'CompteComptable',this.value);this.classList.add('mod')"></td>
+      <td><input class="mono" style="width:100px" value="${esc(l.CompteComptable||'')}" onchange="majLigne(${i},'CompteComptable',this.value);this.classList.add('mod')">
+        <div id="pc-${i}" style="font-size:10px;color:var(--g400);max-width:180px">${libCompteHtml(l.CompteComptable)}</div></td>
       <td><select style="width:100%" onchange="majLigne(${i},'EtablissementAffecte',this.value);this.classList.add('mod')">
         <option value="">—</option>
         ${Object.keys(mapAna).sort().map(a=>`<option ${String(l.EtablissementAffecte||'').trim()===a?'selected':''}>${esc(a)}</option>`).join('')}
-      </select>${sec?`<div class="mono" style="font-size:10px;color:var(--g400)">${sec}</div>`
+      </select>${sec?`<div class="mono" style="font-size:10px;color:${dAna&&dAna.iaHors.includes(sec)?'var(--orange)':'var(--g400)'}">${sec}${dAna&&dAna.iaHors.includes(sec)?' ⚠ Sage : '+esc(dAna.sage.join(', ')):''}</div>`
         :l.EtablissementAffecte?`<div style="color:var(--rouge);font-size:10px">section inconnue : ${esc(l.EtablissementAffecte)}</div>`:''}</td>
       <td class="dr"><input style="width:90px;text-align:right" value="${pa(l.MontantHT)||''}" onchange="majLigne(${i},'MontantHT',this.value);this.classList.add('mod')"></td>
      </tr>`;}).join('')||'<tr><td colspan="4" style="text-align:center;color:var(--g400);padding:14px">Aucune ligne — l\'IA n\'a rien produit pour cette facture</td></tr>'}
@@ -1271,11 +1325,16 @@ function majEntete(champ,val){
   const n=Object.keys(ficheDirty).length;
   const b=document.getElementById('fsave');if(b){b.disabled=!n;b.textContent=`💾 Enregistrer (${n})`;}}
 function ouvrirPDF(u){window.open(u,'tncpdf','popup=yes,width=1000,height=1000,left=60,top=30');}
+function libCompteHtml(c){
+  if(!planC||!Object.keys(planC).length)return'';
+  const k=String(c||'').trim();if(!k)return'';
+  return(k in planC)?esc(planC[k]||''):'<span style="color:var(--rouge)">⛔ absent du plan comptable</span>';}
 function majLigne(i,champ,val){
   const lg=window._ficheLg;if(!lg||!lg[i])return;
   const idL=lg[i].id||lg[i]._id;if(!idL){toast('⛔ Identifiant de ligne inconnu — rechargez la fiche');return;}
   ficheDirty[idL+'|'+champ]={id:idL,champ,avant:lg[i][champ],apres:champ==='MontantHT'?pa(val):val,i,
     cleLigne:lg[i].Cl_x00e9_UniqueLigne||''};
+  if(champ==='CompteComptable'){const z=document.getElementById('pc-'+i);if(z)z.innerHTML=libCompteHtml(val);}
   const n=Object.keys(ficheDirty).length;
   const b=document.getElementById('fsave');if(b){b.disabled=!n;b.textContent=`💾 Enregistrer (${n})`;}}
 async function sauverFiche(){
@@ -1407,6 +1466,7 @@ async function boot(force){
     chargerFactures().catch(e=>toast('⛔ Factures : '+e.message)),
     chargerSage(),
     chargerConsignes(),
+    chargerPlan(),
     chargerDecisions()
   ]);
   rendre();
