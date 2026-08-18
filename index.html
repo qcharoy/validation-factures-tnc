@@ -208,6 +208,7 @@ const CFG_DEF={
   lJournal:'933d4d28-7425-477a-a91e-f4ef31b7d3d1',
   lDecisions:'8565b254-07b6-427f-813d-8d2b9c2f5d55',
   lOverride:'48cd5fec-cc31-4526-a871-f040bdeae084',
+  planFichier:'Correspondance Comptable avec tous les comptes.xlsx',
   sgurl:'',
   sgdrive:'b!J20wOzPDwU-SEZ94ic-HacYp0dSd7HFKruMFfBby2LdmJePb8HkcQKP4GhpGqEY9',
   sgpath:'/Sage/sage-achats.json',
@@ -433,22 +434,50 @@ async function chargerOverrides(){
       agence:String(r.field_4??'').trim(),
       actif:!(r.field_5==='Non'||r.field_5===false||r.field_5==='false')};});}
   catch(e){overrides=[];console.warn('[override]',e.message);}}
+async function planDepuisExcel(){
+  // Fichier « Correspondance Comptable » sur le site PowerBI — lu via l'API workbook
+  // de Graph : pas de téléchargement, pas de parseur xlsx côté navigateur.
+  const sp=await gGet('/sites/trincollect.sharepoint.com:/sites/PowerBI?$select=id');
+  const res=await gGet(`/sites/${sp.id}/drive/root/search(q='${encodeURIComponent(cfg.planFichier)}')?$top=5`);
+  const it=(res.value||[]).find(x=>/\.xlsx$/i.test(x.name||'')&&x.parentReference);
+  if(!it)throw new Error('fichier « '+cfg.planFichier+' » introuvable sur le site PowerBI');
+  const base=`/drives/${it.parentReference.driveId}/items/${it.id}/workbook`;
+  const wss=await gGet(base+'/worksheets?$select=name');
+  const ws=(wss.value||[])[0];if(!ws)throw new Error('classeur sans feuille');
+  const rg=await gGet(base+`/worksheets('${encodeURIComponent(ws.name)}')/usedRange(valuesOnly=true)?$select=values`);
+  const rows=rg.values||[];if(rows.length<2)throw new Error('feuille vide');
+  const hdr=(rows[0]||[]).map(x=>String(x||'').toLowerCase());
+  let iC=hdr.findIndex(h=>h.includes('compte'));if(iC<0)iC=0;
+  let iL=hdr.findIndex(h=>h.includes('désignation')||h.includes('designation'));if(iL<0)iL=2;
+  const m={};
+  for(let r=1;r<rows.length;r++){
+    const cpt=String((rows[r]||[])[iC]??'').trim();
+    if(!/^\d{5,10}$/.test(cpt))continue;
+    m[cpt]=String((rows[r]||[])[iL]??'').trim();}
+  console.log(`[plan] Excel « ${it.name} » feuille « ${ws.name} » : ${Object.keys(m).length} comptes (libellé = ${hdr[iL]||'col '+iL})`);
+  return m;}
+async function planDepuisListe(){
+  const items=await gTout(`/sites/${cfg.site}/lists/PlanComptable/items?$expand=fields&$top=999`);
+  const m={};
+  for(const it of items){const fl=it.fields||{};let cpt=null,lib=null;
+    for(const[k,v]of Object.entries(fl)){
+      if(k==='id'||k.startsWith('_')||k.startsWith('@'))continue;
+      const sv=String(v??'').trim();if(!sv)continue;
+      if(!cpt&&/^\d{5,10}$/.test(sv))cpt=sv;
+      else if(!lib&&/[A-Za-zÀ-ÿ]{3}/.test(sv)&&sv!=='Élément')lib=sv;}
+    if(cpt)m[cpt]=lib||'';}
+  return m;}
 async function chargerPlan(){
-  try{const c=JSON.parse(lgs('tnc2_plan')||'null');
+  try{const c=JSON.parse(lgs('tnc2_plan2')||'null');
     if(c&&c.t&&Date.now()-c.t<24*3600*1000&&c.m&&Object.keys(c.m).length>50){planC=c.m;indexerPlan();return;}}catch(e){}
-  try{
-    const items=await gTout(`/sites/${cfg.site}/lists/PlanComptable/items?$expand=fields&$top=999`);
-    const m={};
-    for(const it of items){const fl=it.fields||{};let cpt=null,lib=null;
-      for(const[k,v]of Object.entries(fl)){
-        if(k==='id'||k.startsWith('_')||k.startsWith('@'))continue;
-        const sv=String(v??'').trim();if(!sv)continue;
-        if(!cpt&&/^\d{5,10}$/.test(sv))cpt=sv;
-        else if(!lib&&/[A-Za-zÀ-ÿ]{3}/.test(sv)&&sv!=='Élément')lib=sv;}
-      if(cpt)m[cpt]=lib||'';}
-    if(Object.keys(m).length>50){planC=m;lss('tnc2_plan',JSON.stringify({t:Date.now(),m}));}
-    else{planC={};console.warn('[plan] liste PlanComptable vide ou illisible');}
-  }catch(e){planC={};console.warn('[plan]',e.message);}
+  let m=null;
+  try{m=await planDepuisExcel();}
+  catch(e){console.warn('[plan] Excel indisponible ('+e.message+') — repli sur la liste PlanComptable');}
+  if(!m||Object.keys(m).length<50){
+    try{const m2=await planDepuisListe();if(Object.keys(m2).length>(m?Object.keys(m).length:0))m=m2;}
+    catch(e){console.warn('[plan] liste :',e.message);}}
+  if(m&&Object.keys(m).length>50){planC=m;lss('tnc2_plan2',JSON.stringify({t:Date.now(),m}));}
+  else{planC=m||{};console.warn('[plan] aucune source exploitable');}
   indexerPlan();}
 const normCpt=c=>String(c||'').replace(/\D/g,'').replace(/0+$/,'');
 function indexerPlan(){planN={};if(!planC)return;
@@ -1489,7 +1518,7 @@ async function histFiche(cle){
 
 /* ═══ PARAMÈTRES ═══════════════════════════════════════════════ */
 const PARAM_KEYS=['cleApi','sgurl','whSage','whRetraiter','whAnalyse','whChercher','whTraiter','journalImport','compte488','structure',
-  'lFactures','lLignes','lConsignes','lJournal','lDecisions','lOverride'];
+  'lFactures','lLignes','lConsignes','lJournal','lDecisions','lOverride','planFichier'];
 function ouvrirParams(){
   const ch=(k,l)=>`<div style="margin-bottom:9px"><div style="font-size:11px;color:var(--g400);margin-bottom:2px">${l}</div>
     <input type="text" id="p-${k}" style="width:100%" value="${esc(cfg[k]||'')}"></div>`;
@@ -1513,7 +1542,8 @@ function ouvrirParams(){
     ${ch('lFactures','Factures')}${ch('lLignes','LignesFacture')}
     ${ch('lConsignes','ConsignesFournisseur')}${ch('lJournal','JournalCorrections')}
     ${ch('lDecisions','DecisionsDoublons')}
-    ${ch('lOverride','OverrideEtablissement')}</div>
+    ${ch('lOverride','OverrideEtablissement')}
+    ${ch('planFichier','Fichier Excel correspondance comptable (site PowerBI)')}</div>
    </div>
    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
      <button class="b" onclick="if(confirm('Revenir aux valeurs de production ?')){PARAM_KEYS.forEach(k=>{try{localStorage.removeItem('tnc2_'+k)}catch(e){}});location.reload();}">↩︎ Valeurs d'usine</button>
