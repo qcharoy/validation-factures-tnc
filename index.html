@@ -230,6 +230,7 @@ const fa=v=>Number(v||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximum
 const esc=s=>String(s??'').replace(/[&<>"'`=\/]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',
   "'":'&#39;','`':'&#96;','=':'&#61;','/':'&#47;'}[c]));
 const numNorm=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^0+/,'');
+const digDe=s=>{const d=String(s||'').replace(/\D/g,'').replace(/^0+/,'');return d.length>=5?d:'';};
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const fd=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'})};
 const fdh=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
@@ -423,7 +424,7 @@ async function chargerSage(){
     // Sens comptable : si la majorité des montants est négative, on retourne tout.
     const neg=sage.filter(g=>g.ht<0).length;
     if(neg>sage.length*0.6)sage.forEach(g=>{g.ht=-g.ht;if(g.ttc!=null)g.ttc=-g.ttc;if(g.a!=null)g.a=-g.a;});
-    sageMeta={nom:f.nom,modifie:f.modifie,n:sage.length};_pmap=null;
+    sageMeta={nom:f.nom,modifie:f.modifie,n:sage.length};_pmap=null;_pdig=null;
   }catch(e){sage=null;sageMeta={erreur:e.message};console.warn('[sage]',e.message);}}
 
 async function chargerOverrides(){
@@ -527,11 +528,17 @@ async function journaliser(cle,num,entrees,motif){
    P2 : numéro seul → rapproché, écart SIGNALÉ (jamais masqué en « absente »).
    Plusieurs candidats non départagés → ambiguë, pas d'appariement au hasard. */
 const TOL=0.02;
-let _rap=null,_pmap=null,_lidx=null;
+let _rap=null,_pmap=null,_pdig=null,_lidx=null;
 function pieceDe(f){
   if(!sage)return null;
-  if(!_pmap){_pmap=new Map();sage.forEach(g=>{if(g.refNorm&&!_pmap.has(g.refNorm))_pmap.set(g.refNorm,g);});}
-  return _pmap.get(numNorm(f.NumeroFacture))||null;}
+  if(!_pmap){_pmap=new Map();_pdig=new Map();
+    sage.forEach(g=>{if(g.refNorm&&!_pmap.has(g.refNorm))_pmap.set(g.refNorm,g);
+      const dk=digDe(g.refNorm);
+      if(dk)_pdig.set(dk,_pdig.has(dk)?null:g);});}   // collision → null = inutilisable
+  const direct=_pmap.get(numNorm(f.NumeroFacture));
+  if(direct)return direct;
+  const dk=digDe(f.NumeroFacture);
+  return(dk&&_pdig.get(dk))||null;}
 /* Comparaison analytique IA vs Sage (codes de sections, pas de montants dans l'export) */
 function anaDiff(f,lg,g){
   g=g||pieceDe(f);if(!g)return null;
@@ -560,13 +567,24 @@ function rapprocher(){
   const expNorm=new Set(rows.filter(f=>etatExport(f)).map(f=>numNorm(f.NumeroFacture)));
   const fac=rows.filter(f=>dansPer(f.DateFacture)&&!etatExport(f));
   const parNorm={};fac.forEach(f=>{const n=numNorm(f.NumeroFacture);if(n)(parNorm[n]=parNorm[n]||[]).push(f);});
+  const parDig={};fac.forEach(f=>{const k=digDe(f.NumeroFacture);if(k)(parDig[k]=parDig[k]||[]).push(f);});
   const R={manquantes:[],ecarts:[],ok:[],ambigues:[],sansSage:[]};
   (sage||[]).forEach(g=>{
     if(!dansPer(g.d))return;
     if(expNorm.has(g.refNorm))return;   // exportée : suivie dans « Lots générés », plus dans le flux
     if(modeApp==='cible'&&(g.a==null||g.a<=0.005))return;   // cible : seuls les 488 débiteurs
     const cand=parNorm[g.refNorm]||[];
-    if(!cand.length){R.manquantes.push({g});return;}
+    if(!cand.length){
+      // Passe 3 : préfixe/suffixe alphabétique ignoré (« N-26067020 » vs « 26067020 »),
+      // apparié UNIQUEMENT si montant au centime et candidat unique.
+      const dk=digDe(g.refNorm);
+      const cd=(dk&&parDig[dk])||[];
+      if(cd.length){
+        const mS3=refSage(g);
+        const p3=cd.filter(f=>Math.abs(refIA(f,modeApp==='cible'?sommeLignesHT(f.CleUnique):null)-mS3)<=TOL);
+        if(p3.length===1){R.ok.push({g,f:p3[0],ecart:0,partiel:true});return;}
+      }
+      R.manquantes.push({g});return;}
     const mS=refSage(g);
     const p1=cand.filter(f=>Math.abs(refIA(f,modeApp==='cible'?sommeLignesHT(f.CleUnique):null)-mS)<=TOL);
     if(p1.length===1){R.ok.push({g,f:p1[0],ecart:0});return;}
@@ -1395,7 +1413,7 @@ function rendreFiche(f,lg){
      ${ge('Date facture','DateFacture','date')}${ge('Échéance','DateEcheance','date')}${gi('Statut',esc(f.Statut||'—'))}
      ${ge('TTC lu par l\'IA','TotalTTC')}${ge('HT lu','TotalHT')}${ge('TVA lue','TVA')}
      ${gi('Σ lignes HT',fa(c.somme)+' €')}
-     ${rS!=null?gi(libRef()+' (Sage)',fa(rS)+' €'):gi('Sage','non rapprochée')}
+     ${rS!=null?gi(libRef()+' (Sage)'+(g&&g.refNorm!==numNorm(f.NumeroFacture)?' · pièce '+esc(g.r):''),fa(rS)+' €'):gi('Sage','non rapprochée')}
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
      ${g&&g.aux?gi('Tiers Sage (CT_Num)','<span class="mono">'+esc(g.aux)+'</span>'+(g.tiers?' · '+esc(g.tiers):'')):''}
    </div>
