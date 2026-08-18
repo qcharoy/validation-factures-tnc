@@ -1462,4 +1462,88 @@ function ouvrirParams(){
     ${ch('whSage','Webhook n8n — actualisation des données Sage (bouton ⟳)')}
     ${ch('whRetraiter','Webhook n8n — retraitement')}
     ${ch('whAnalyse',"Webhook n8n — analyse d'écart")}
-    ${ch('whChercher','Webhook n8n — recherc
+    ${ch('whChercher','Webhook n8n — recherche boîte compta (pièces non lues)')}
+    ${ch('whTraiter','Webhook n8n — envoi au worker après confirmation')}
+    <h1 style="font-size:12.5px;margin:12px 0 6px;color:var(--vert)">Import Sage</h1>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
+    ${ch('journalImport','Journal')}${ch('compte488',"Compte d'attente")}${ch('structure','N° structure analytique')}</div>
+    <h1 style="font-size:12.5px;margin:12px 0 6px;color:var(--vert)">Listes SharePoint (IDs)</h1>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+    ${ch('lFactures','Factures')}${ch('lLignes','LignesFacture')}
+    ${ch('lConsignes','ConsignesFournisseur')}${ch('lJournal','JournalCorrections')}
+    ${ch('lDecisions','DecisionsDoublons')}
+    ${ch('lOverride','OverrideEtablissement')}</div>
+   </div>
+   <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+     <button class="b" onclick="if(confirm('Revenir aux valeurs de production ?')){PARAM_KEYS.forEach(k=>{try{localStorage.removeItem('tnc2_'+k)}catch(e){}});location.reload();}">↩︎ Valeurs d'usine</button>
+     <button class="b" onclick="idbEffacer('lignes2').then(()=>{lignes=null;lignesDate=null;toast('🗑 Cache vidé — rechargement…');boot(true);closeMo();})">🗑 Vider le cache lignes</button>
+     <span style="margin-left:auto;display:flex;gap:8px">
+       <button class="b" onclick="closeMo()">Annuler</button>
+       <button class="b principal" onclick="sauverParams()">💾 Enregistrer</button></span>
+   </div>`,true);}
+function sauverParams(){
+  PARAM_KEYS.forEach(k=>{const e=document.getElementById('p-'+k);if(!e)return;
+    const v=e.value.trim();
+    if(v===String(CFG_DEF[k]||'')){try{localStorage.removeItem('tnc2_'+k)}catch(err){}}
+    else setCfg(k,v);});
+  closeMo();toast('💾 Paramètres enregistrés — rechargement…');boot(true);}
+
+/* ═══ ACTUALISATION SAGE À LA DEMANDE ═════════════════════════ */
+async function actualiserSage(){
+  const b=document.getElementById('btnsage');
+  if(b&&b.disabled)return;
+  if(b){b.disabled=true;b.innerHTML='<span class="spin" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span>Export en cours…';}
+  const fin=msg=>{if(b){b.disabled=false;b.textContent='⟳ Actualiser Sage';}if(msg)toast(msg,6000);};
+  let avant='';try{avant=(await metaSage()).lastModifiedDateTime||'';}catch(e){}
+  // Déclenchement du webhook. Si CORS bloque la lecture de la réponse,
+  // la requête part quand même : on bascule en mode « aveugle » et on
+  // surveille la date du fichier sur SharePoint.
+  let lance=false;
+  const uSage=avecCle(cfg.whSage);
+  try{const r=await fetch(uSage,{method:'GET'});lance=r.ok;}catch(e){}
+  if(!lance){try{await fetch(uSage,{method:'GET',mode:'no-cors'});lance=true;}catch(e){}}
+  if(!lance){try{await fetch(uSage,{method:'POST',mode:'no-cors'});lance=true;}catch(e){}}
+  if(!lance){fin('⛔ Webhook injoignable — vérifiez ⚙️ Paramètres et que le workflow n8n est actif');return;}
+  toast('🔄 Chaîne lancée : dataflow SAGE100 → modèle sémantique → export → dépôt. Comptez 5 à 20 min, je surveille le dépôt…',8000);
+  const t0=Date.now();
+  while(Date.now()-t0<1500000){
+    await new Promise(r=>setTimeout(r,15000));
+    if(b)b.innerHTML='<span class="spin" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span>Actualisation… '+Math.round((Date.now()-t0)/60000)+' min';
+    try{const m=await metaSage();
+      if(m.lastModifiedDateTime&&m.lastModifiedDateTime!==avant){
+        await chargerSage();_rap=null;rendre();
+        fin('✅ Données Sage actualisées — '+(sageMeta&&sageMeta.n||0)+' pièces, fichier du '+fd(sageMeta&&sageMeta.modifie));
+        return;}}
+    catch(e){}}
+  fin("⏱ Aucun nouveau fichier après 25 min — la chaîne a probablement échoué, regardez l'exécution n8n (WF-SAGE-EXPORT)");}
+
+/* ═══ DÉMARRAGE ════════════════════════════════════════════════ */
+function majUinfo(){
+  const n=moi();const ini=n.split(/[\s.@]+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase();
+  document.getElementById('uinfo').innerHTML=`<span class="pastille">${esc(ini||'?')}</span><span>${esc(n)}</span>`;}
+async function boot(force){
+  document.getElementById('login').style.display='none';
+  majUinfo();majMode();initPer();
+  if(force)_rap=null;
+  document.getElementById('vue').innerHTML='<div class="chargeur"><span class="spin"></span>Chargement des données…</div>';
+  await Promise.all([
+    chargerFactures().catch(e=>toast('⛔ Factures : '+e.message)),
+    chargerSage(),
+    chargerConsignes(),
+    chargerPlan(),
+    chargerOverrides(),
+    chargerDecisions()
+  ]);
+  rendre();
+  await chargerLignes(force).catch(e=>toast('⛔ Lignes : '+e.message));
+  _rap=null;rendre();}
+window.addEventListener('load',async()=>{
+  try{
+    initMsal();
+    const r=await msalApp.handleRedirectPromise();
+    if(r&&r.account)account=r.account;
+    if(!account)account=msalApp.getAllAccounts()[0]||null;
+    if(account){msalApp.setActiveAccount(account);await boot();}
+  }catch(e){toast('⚠️ '+e.message);console.error(e);}});
+</script>
+</body></html>
