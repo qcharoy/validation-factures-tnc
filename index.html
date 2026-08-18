@@ -207,6 +207,7 @@ const CFG_DEF={
   lConsignes:'15697088-2113-457c-a237-66e87cbbc0cd',
   lJournal:'933d4d28-7425-477a-a91e-f4ef31b7d3d1',
   lDecisions:'8565b254-07b6-427f-813d-8d2b9c2f5d55',
+  lOverride:'48cd5fec-cc31-4526-a871-f040bdeae084',
   sgurl:'',
   sgdrive:'b!J20wOzPDwU-SEZ94ic-HacYp0dSd7HFKruMFfBby2LdmJePb8HkcQKP4GhpGqEY9',
   sgpath:'/Sage/sage-achats.json',
@@ -301,7 +302,8 @@ let lignesDate=null;    // date du cache
 let sage=null;          // pièces Sage agrégées {r,refNorm,ht,ttc,a,aux,tiers,d,s[],c[]}
 let sageMeta=null;
 let consignes=null;
-let planC=null;      // plan comptable {compte: libellé}     // consignes fournisseur
+let planC=null;
+let overrides=null;  // OverrideEtablissement {_id,nom,siret,agence,actif}      // plan comptable {compte: libellé}     // consignes fournisseur
 let decisions={};       // décisions doublons (Title -> fiche)
 let vueActive='tb';
 let modeApp=lgs('tnc2_mode')||'test';
@@ -374,8 +376,8 @@ async function chargerFactures(){
 async function chargerLignes(forcer){
   if(lignes&&!forcer)return lignes;
   if(!forcer){const c=await idbLire('lignes2');
-    if(c&&c.l&&c.l.length&&c.l[0].id){lignes=c.l;lignesDate=c.d;
-      if(Date.now()-c.d>6*3600*1000)rafraichirLignesFond();
+    if(c&&c.l&&c.l.length&&c.l[0].id){lignes=c.l;_lidx=null;lignesDate=c.d;
+      rafraichirLignesFond();   // toujours : le cache sert l'affichage immédiat, SharePoint fait foi quelques secondes après
       return lignes;}}
   const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lLignes}/items?$expand=fields($select=${CHAMPS_LIGNE})&$top=999`);
   lignes=items.filter(it=>it.fields).map(it=>({...it.fields,id:it.id}));_lidx=null;lignesDate=Date.now();
@@ -423,6 +425,14 @@ async function chargerSage(){
     sageMeta={nom:f.nom,modifie:f.modifie,n:sage.length};_pmap=null;
   }catch(e){sage=null;sageMeta={erreur:e.message};console.warn('[sage]',e.message);}}
 
+async function chargerOverrides(){
+  try{const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lOverride}/items?$expand=fields($select=Title,field_1,field_2,field_3,field_4,field_5)&$top=500`);
+    overrides=items.map(it=>{const r=it.fields||{};return{_id:it.id,
+      nom:String(r.field_1??r.Title??'').trim(),
+      siret:String(r.field_3??'').trim(),
+      agence:String(r.field_4??'').trim(),
+      actif:!(r.field_5==='Non'||r.field_5===false||r.field_5==='false')};});}
+  catch(e){overrides=[];console.warn('[override]',e.message);}}
 async function chargerPlan(){
   try{const c=JSON.parse(lgs('tnc2_plan')||'null');
     if(c&&c.t&&Date.now()-c.t<24*3600*1000&&c.m&&Object.keys(c.m).length>50){planC=c.m;return;}}catch(e){}
@@ -1087,7 +1097,60 @@ function vCO(){
        <button class="b principal" onclick="sauverConsigneIdx(${i})">💾 Enregistrer</button><br>
        <button class="b" style="margin-top:5px" onclick='retraiterFournisseur(${JSON.stringify(c.motif||'')})'>🔄 Relire</button></td>
     </tr>`).join('')||'<tr><td colspan="4" style="text-align:center;color:var(--g400);padding:20px">Liste vide ou inaccessible</td></tr>'}
+   </tbody></table></div>
+   ${sectionOverrides()}`;}
+function sectionOverrides(){
+  if(!overrides)return '';
+  const lst=overrides.slice().sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
+  window._ovTri=lst;
+  const agOpts=a=>'<option value=""></option>'+Object.keys(mapAna).sort().map(x=>`<option ${a===x?'selected':''}>${esc(x)}</option>`).join('');
+  return `<h1 style="font-size:15px;margin:22px 0 2px">🎯 Overrides d'établissement (${lst.filter(o=>o.actif).length} actifs)</h1>
+   <div class="sous">Force l'agence d'un fournisseur (prioritaire sur son code postal). Un chantier identifié sur une ligne reste prioritaire sur l'override.
+     Matching par SIRET d'abord, puis par nom. Après modification : 💾 puis 🔄 relire les factures.</div>
+   <div class="twrap"><table><thead><tr><th style="width:220px">Fournisseur (nom)</th><th style="width:140px">SIRET / SIREN</th><th style="width:230px">Agence forcée</th><th style="width:60px">Actif</th><th style="width:190px"></th></tr></thead><tbody>
+   ${lst.map((o,i)=>`<tr style="${o.actif?'':'opacity:.5'}">
+     <td><input type="text" id="ov-n-${i}" style="width:100%" value="${esc(o.nom)}"></td>
+     <td><input type="text" class="mono" id="ov-s-${i}" style="width:100%" value="${esc(o.siret)}"></td>
+     <td><select id="ov-a-${i}" style="width:100%">${agOpts(o.agence)}</select>
+       ${o.agence&&!mapAna[o.agence]?'<div style="color:var(--rouge);font-size:10px">agence inconnue de la table des sections</div>':''}</td>
+     <td style="text-align:center"><input type="checkbox" id="ov-c-${i}" ${o.actif?'checked':''}></td>
+     <td style="white-space:nowrap"><button class="b principal" onclick="sauverOverride(${i})">💾</button>
+       <button class="b" onclick='retraiterFournisseur(${JSON.stringify(o.nom||'')})'>🔄 Relire</button></td>
+    </tr>`).join('')}
+   <tr style="background:var(--g50)">
+     <td><input type="text" id="ov-n-new" placeholder="nouveau fournisseur…" style="width:100%"></td>
+     <td><input type="text" class="mono" id="ov-s-new" placeholder="SIRET (optionnel)" style="width:100%"></td>
+     <td><select id="ov-a-new" style="width:100%">${agOpts('')}</select></td>
+     <td style="text-align:center">—</td>
+     <td><button class="b principal" onclick="creerOverride()">➕ Ajouter</button></td></tr>
    </tbody></table></div>`;}
+async function sauverOverride(i){
+  const o=(window._ovTri||[])[i];if(!o)return;
+  const nom=(document.getElementById('ov-n-'+i)||{}).value.trim();
+  const siret=(document.getElementById('ov-s-'+i)||{}).value.trim();
+  const agence=(document.getElementById('ov-a-'+i)||{}).value;
+  const actif=!!(document.getElementById('ov-c-'+i)||{}).checked;
+  if(!nom&&!siret){toast('⛔ Nom ou SIRET requis');return;}
+  if(actif&&!agence){toast('⛔ Choisissez une agence (ou décochez Actif)');return;}
+  try{await gWrite('PATCH',`/sites/${cfg.site}/lists/${cfg.lOverride}/items/${o._id}/fields`,
+      {field_1:nom,field_3:siret,field_4:agence,field_5:actif?'Oui':'Non'});
+    journaliser('OVERRIDE|'+o._id,'',[{cible:'Override '+nom,champ:'Agence forcée',
+      avant:(o.agence||'—')+(o.actif?'':' (inactif)'),apres:(agence||'—')+(actif?'':' (inactif)')}],'Modification override établissement');
+    Object.assign(o,{nom,siret,agence,actif});
+    toast('💾 Override enregistré — 🔄 relisez les factures du fournisseur pour l\'appliquer');rendre();}
+  catch(e){toast('⛔ '+e.message);}}
+async function creerOverride(){
+  const nom=(document.getElementById('ov-n-new')||{}).value.trim();
+  const siret=(document.getElementById('ov-s-new')||{}).value.trim();
+  const agence=(document.getElementById('ov-a-new')||{}).value;
+  if(!nom&&!siret){toast('⛔ Nom ou SIRET requis');return;}
+  if(!agence){toast('⛔ Choisissez l\'agence forcée');return;}
+  try{const r=await gWrite('POST',`/sites/${cfg.site}/lists/${cfg.lOverride}/items`,
+      {fields:{Title:nom||siret,field_1:nom,field_3:siret,field_4:agence,field_5:'Oui'}});
+    overrides.push({_id:r.id,nom,siret,agence,actif:true});
+    journaliser('OVERRIDE|'+(r.id||''),'',[{cible:'Override '+nom,champ:'Création',avant:'',apres:agence}],'Nouvel override établissement');
+    toast('➕ Override créé — 🔄 relisez les factures du fournisseur');rendre();}
+  catch(e){toast('⛔ '+e.message);}}
 async function sauverConsigne(id,patch){
   await gWrite('PATCH',`/sites/${cfg.site}/lists/${cfg.lConsignes}/items/${id}/fields`,{field_2:patch.texte});
   const c=(consignes||[]).find(x=>String(x._id)===String(id));
@@ -1385,7 +1448,7 @@ async function histFiche(cle){
 
 /* ═══ PARAMÈTRES ═══════════════════════════════════════════════ */
 const PARAM_KEYS=['cleApi','sgurl','whSage','whRetraiter','whAnalyse','whChercher','whTraiter','journalImport','compte488','structure',
-  'lFactures','lLignes','lConsignes','lJournal','lDecisions'];
+  'lFactures','lLignes','lConsignes','lJournal','lDecisions','lOverride'];
 function ouvrirParams(){
   const ch=(k,l)=>`<div style="margin-bottom:9px"><div style="font-size:11px;color:var(--g400);margin-bottom:2px">${l}</div>
     <input type="text" id="p-${k}" style="width:100%" value="${esc(cfg[k]||'')}"></div>`;
@@ -1399,86 +1462,4 @@ function ouvrirParams(){
     ${ch('whSage','Webhook n8n — actualisation des données Sage (bouton ⟳)')}
     ${ch('whRetraiter','Webhook n8n — retraitement')}
     ${ch('whAnalyse',"Webhook n8n — analyse d'écart")}
-    ${ch('whChercher','Webhook n8n — recherche boîte compta (pièces non lues)')}
-    ${ch('whTraiter','Webhook n8n — envoi au worker après confirmation')}
-    <h1 style="font-size:12.5px;margin:12px 0 6px;color:var(--vert)">Import Sage</h1>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
-    ${ch('journalImport','Journal')}${ch('compte488',"Compte d'attente")}${ch('structure','N° structure analytique')}</div>
-    <h1 style="font-size:12.5px;margin:12px 0 6px;color:var(--vert)">Listes SharePoint (IDs)</h1>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
-    ${ch('lFactures','Factures')}${ch('lLignes','LignesFacture')}
-    ${ch('lConsignes','ConsignesFournisseur')}${ch('lJournal','JournalCorrections')}
-    ${ch('lDecisions','DecisionsDoublons')}</div>
-   </div>
-   <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-     <button class="b" onclick="if(confirm('Revenir aux valeurs de production ?')){PARAM_KEYS.forEach(k=>{try{localStorage.removeItem('tnc2_'+k)}catch(e){}});location.reload();}">↩︎ Valeurs d'usine</button>
-     <button class="b" onclick="idbEffacer('lignes2').then(()=>{lignes=null;lignesDate=null;toast('🗑 Cache vidé — rechargement…');boot(true);closeMo();})">🗑 Vider le cache lignes</button>
-     <span style="margin-left:auto;display:flex;gap:8px">
-       <button class="b" onclick="closeMo()">Annuler</button>
-       <button class="b principal" onclick="sauverParams()">💾 Enregistrer</button></span>
-   </div>`,true);}
-function sauverParams(){
-  PARAM_KEYS.forEach(k=>{const e=document.getElementById('p-'+k);if(!e)return;
-    const v=e.value.trim();
-    if(v===String(CFG_DEF[k]||'')){try{localStorage.removeItem('tnc2_'+k)}catch(err){}}
-    else setCfg(k,v);});
-  closeMo();toast('💾 Paramètres enregistrés — rechargement…');boot(true);}
-
-/* ═══ ACTUALISATION SAGE À LA DEMANDE ═════════════════════════ */
-async function actualiserSage(){
-  const b=document.getElementById('btnsage');
-  if(b&&b.disabled)return;
-  if(b){b.disabled=true;b.innerHTML='<span class="spin" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span>Export en cours…';}
-  const fin=msg=>{if(b){b.disabled=false;b.textContent='⟳ Actualiser Sage';}if(msg)toast(msg,6000);};
-  let avant='';try{avant=(await metaSage()).lastModifiedDateTime||'';}catch(e){}
-  // Déclenchement du webhook. Si CORS bloque la lecture de la réponse,
-  // la requête part quand même : on bascule en mode « aveugle » et on
-  // surveille la date du fichier sur SharePoint.
-  let lance=false;
-  const uSage=avecCle(cfg.whSage);
-  try{const r=await fetch(uSage,{method:'GET'});lance=r.ok;}catch(e){}
-  if(!lance){try{await fetch(uSage,{method:'GET',mode:'no-cors'});lance=true;}catch(e){}}
-  if(!lance){try{await fetch(uSage,{method:'POST',mode:'no-cors'});lance=true;}catch(e){}}
-  if(!lance){fin('⛔ Webhook injoignable — vérifiez ⚙️ Paramètres et que le workflow n8n est actif');return;}
-  toast('🔄 Chaîne lancée : dataflow SAGE100 → modèle sémantique → export → dépôt. Comptez 5 à 20 min, je surveille le dépôt…',8000);
-  const t0=Date.now();
-  while(Date.now()-t0<1500000){
-    await new Promise(r=>setTimeout(r,15000));
-    if(b)b.innerHTML='<span class="spin" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span>Actualisation… '+Math.round((Date.now()-t0)/60000)+' min';
-    try{const m=await metaSage();
-      if(m.lastModifiedDateTime&&m.lastModifiedDateTime!==avant){
-        await chargerSage();_rap=null;rendre();
-        fin('✅ Données Sage actualisées — '+(sageMeta&&sageMeta.n||0)+' pièces, fichier du '+fd(sageMeta&&sageMeta.modifie));
-        return;}}
-    catch(e){}}
-  fin("⏱ Aucun nouveau fichier après 25 min — la chaîne a probablement échoué, regardez l'exécution n8n (WF-SAGE-EXPORT)");}
-
-/* ═══ DÉMARRAGE ════════════════════════════════════════════════ */
-function majUinfo(){
-  const n=moi();const ini=n.split(/[\s.@]+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase();
-  document.getElementById('uinfo').innerHTML=`<span class="pastille">${esc(ini||'?')}</span><span>${esc(n)}</span>`;}
-async function boot(force){
-  document.getElementById('login').style.display='none';
-  majUinfo();majMode();initPer();
-  if(force)_rap=null;
-  document.getElementById('vue').innerHTML='<div class="chargeur"><span class="spin"></span>Chargement des données…</div>';
-  await Promise.all([
-    chargerFactures().catch(e=>toast('⛔ Factures : '+e.message)),
-    chargerSage(),
-    chargerConsignes(),
-    chargerPlan(),
-    chargerDecisions()
-  ]);
-  rendre();
-  await chargerLignes(force).catch(e=>toast('⛔ Lignes : '+e.message));
-  _rap=null;rendre();}
-window.addEventListener('load',async()=>{
-  try{
-    initMsal();
-    const r=await msalApp.handleRedirectPromise();
-    if(r&&r.account)account=r.account;
-    if(!account)account=msalApp.getAllAccounts()[0]||null;
-    if(account){msalApp.setActiveAccount(account);await boot();}
-  }catch(e){toast('⚠️ '+e.message);console.error(e);}});
-</script>
-</body></html>
+    ${ch('whChercher','Webhook n8n — recherc
