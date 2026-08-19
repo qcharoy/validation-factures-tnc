@@ -209,6 +209,7 @@ const CFG_DEF={
   lDecisions:'8565b254-07b6-427f-813d-8d2b9c2f5d55',
   lOverride:'48cd5fec-cc31-4526-a871-f040bdeae084',
   planFichier:'Correspondance Comptable avec tous les comptes.xlsx',
+  equivSections:'',   /* équivalences de sections — vide par défaut : 56 Lorient/Vannes et 44 Nord/Sud sont bien des agences distinctes */
   sgurl:'',
   sgdrive:'b!J20wOzPDwU-SEZ94ic-HacYp0dSd7HFKruMFfBby2LdmJePb8HkcQKP4GhpGqEY9',
   sgpath:'/Sage/sage-achats.json',
@@ -539,15 +540,27 @@ function pieceDe(f){
   if(direct)return direct;
   const dk=digDe(f.NumeroFacture);
   return(dk&&_pdig.get(dk))||null;}
-/* Comparaison analytique IA vs Sage (codes de sections, pas de montants dans l'export) */
+/* Comparaison analytique IA vs Sage (codes de sections, pas de montants dans l'export).
+   Équivalences explicites (cfg.equivSections) : sections déclarées interchangeables
+   — ex. MORBIH5601=MORBIH5602 (une seule agence dans les faits). PAS de règle de
+   préfixe : LOIREA4402/4403 = Nantes Sud/Nord, deux agences bien distinctes. */
+let _eqMap=null,_eqSrc=null;
+function eqSection(x){
+  if(_eqSrc!==cfg.equivSections){_eqSrc=cfg.equivSections;_eqMap={};
+    String(cfg.equivSections||'').split(/[;\n]+/).forEach(gr=>{
+      const m=gr.split(/[=,]/).map(t=>t.trim().toUpperCase()).filter(Boolean);
+      if(m.length>1)m.forEach(t=>{_eqMap[t]=m[0];});});}
+  const k=String(x||'').trim().toUpperCase();
+  return _eqMap[k]||k;}
 function anaDiff(f,lg,g){
   g=g||pieceDe(f);if(!g)return null;
-  const sage=(g.sections||[]).filter(Boolean);
-  if(!sage.length)return null;                    // pièce Sage sans analytique (ex. 488 seul) : pas comparable
-  const ia=[...new Set((lg||lignesDe(f.CleUnique)).map(l=>sectionDe(l.EtablissementAffecte)).filter(Boolean))];
-  if(!ia.length)return null;
-  const iaHors=ia.filter(x=>!sage.includes(x));
-  return{ia,sage,iaHors,ok:!iaHors.length};}
+  const sageRaw=(g.sections||[]).filter(Boolean);
+  if(!sageRaw.length)return null;                 // pièce Sage sans analytique (ex. 488 seul) : pas comparable
+  const iaRaw=[...new Set((lg||lignesDe(f.CleUnique)).map(l=>sectionDe(l.EtablissementAffecte)).filter(Boolean))];
+  if(!iaRaw.length)return null;
+  const sageEq=sageRaw.map(eqSection);
+  const iaHors=iaRaw.filter(x=>!sageEq.includes(eqSection(x)));
+  return{ia:iaRaw,sage:sageRaw,iaHors,ok:!iaHors.length};}
 /* État d'export : verrou SharePoint (Statut) croisé avec la preuve Sage (488 soldé) */
 function etatExport(f){
   const m=String(f.Statut||'').match(/Export[ée]\s*(\S+)?/i);
@@ -1420,6 +1433,7 @@ function rendreFiche(f,lg){
    ${c.ko.length?`<div class="alerte">⚠️ ${c.ko.map(esc).join(' · ')}</div>`:''}
    ${(c.warn||[]).length?`<div class="alerte" style="border-left-color:var(--orange);background:var(--orange-l);color:#7a5200">🟠 ${(c.warn||[]).map(esc).join(' · ')} — alerte seulement, n'empêche pas l'import</div>`:''}
    ${!c.ko.length&&!(c.warn||[]).length?'<div class="info" style="padding:7px 11px">✅ Tous les contrôles passent.</div>':''}
+   ${lg.length?recapEcriture({f,g,lg,somme:c.somme}):''}
    <h1 style="font-size:13.5px;margin:12px 0 6px">Lignes analytiques (${lg.length}) — modifiables, motif obligatoire</h1>
    ${lg.length>1?`<div class="barre" style="margin:0 0 8px">
      <span class="lab">Imputer toute la facture sur</span>
@@ -1449,6 +1463,31 @@ function rendreFiche(f,lg){
    </div>
    <div id="fhist"></div>`;
   window._ficheLg=lg;window._ficheF=f;}
+function recapEcriture(cand){
+  let ecr;try{ecr=ecritures(cand);}catch(e){return'';}
+  if(!ecr.length)return'';
+  const g488=ecr[0];
+  const comptes=[];let cur=null;
+  ecr.slice(1).forEach(e=>{
+    if(e.typ==='G'){cur={cpt:e.cpt,mt:e.deb,secs:[]};comptes.push(cur);}
+    else if(cur)cur.secs.push({sec:e.sec,mt:e.deb});});
+  const tot=r2(comptes.reduce((x,y)=>x+y.mt,0));
+  const ok=Math.abs(tot-g488.cre)<0.005;
+  return `<div style="border:1px solid var(--g200);border-radius:9px;margin:0 0 12px;overflow:hidden">
+   <div style="background:var(--vert-l);color:var(--vert);font-weight:600;font-size:12px;padding:7px 12px">
+     🧾 Synthèse comptable — l'écriture telle qu'elle partira dans Sage (${comptes.length} compte(s), ${ecr.length} lignes générées)</div>
+   <table style="font-size:12px"><tbody>
+   ${comptes.map(x=>`<tr>
+     <td class="mono" style="width:92px;font-weight:600">${esc(x.cpt)}</td>
+     <td style="width:210px;font-size:11.5px;color:var(--g500)">${libCompteHtml(x.cpt)||'—'}</td>
+     <td>${x.secs.map(sc=>`<span class="tag g" style="margin:1px 4px 1px 0;display:inline-block">${esc(sc.sec||'?')} · ${fa(sc.mt)}</span>`).join('')}</td>
+     <td class="dr" style="width:110px;font-weight:600">${fa(x.mt)} €</td></tr>`).join('')}
+   <tr style="background:var(--bleu-l)">
+     <td class="mono" style="font-weight:600">${esc(g488.cpt)}</td>
+     <td style="font-size:11.5px;color:var(--g500)">contrepartie (crédit)${g488.tiers?' · tiers '+esc(g488.tiers):''}</td>
+     <td style="text-align:right;font-size:11px;color:var(--g400)">équilibre</td>
+     <td class="dr" style="font-weight:700">${fa(g488.cre)} € ${ok?'<span class="ecart-ok">✓</span>':`<span class="ecart-ko">${fa(r2(tot-g488.cre))} €</span>`}</td></tr>
+   </tbody></table></div>`;}
 function analyserFiche(cle){
   const R=sage&&lignes?rapprocher():null;
   const x=R?(R.ecarts.find(y=>y.f.CleUnique===cle)||R.ok.find(y=>y.f.CleUnique===cle)):null;
@@ -1536,7 +1575,7 @@ async function histFiche(cle){
 
 /* ═══ PARAMÈTRES ═══════════════════════════════════════════════ */
 const PARAM_KEYS=['cleApi','sgurl','whSage','whRetraiter','whAnalyse','whChercher','whTraiter','journalImport','compte488','structure',
-  'lFactures','lLignes','lConsignes','lJournal','lDecisions','lOverride','planFichier'];
+  'lFactures','lLignes','lConsignes','lJournal','lDecisions','lOverride','planFichier','equivSections'];
 function ouvrirParams(){
   const ch=(k,l)=>`<div style="margin-bottom:9px"><div style="font-size:11px;color:var(--g400);margin-bottom:2px">${l}</div>
     <input type="text" id="p-${k}" style="width:100%" value="${esc(cfg[k]||'')}"></div>`;
@@ -1561,7 +1600,8 @@ function ouvrirParams(){
     ${ch('lConsignes','ConsignesFournisseur')}${ch('lJournal','JournalCorrections')}
     ${ch('lDecisions','DecisionsDoublons')}
     ${ch('lOverride','OverrideEtablissement')}
-    ${ch('planFichier','Fichier Excel correspondance comptable (site PowerBI)')}</div>
+    ${ch('planFichier','Fichier Excel correspondance comptable (site PowerBI)')}
+    ${ch('equivSections','Sections équivalentes (ex. MORBIH5601=MORBIH5602 ; un groupe par ligne)')}</div>
    </div>
    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
      <button class="b" onclick="if(confirm('Revenir aux valeurs de production ?')){PARAM_KEYS.forEach(k=>{try{localStorage.removeItem('tnc2_'+k)}catch(e){}});location.reload();}">↩︎ Valeurs d'usine</button>
