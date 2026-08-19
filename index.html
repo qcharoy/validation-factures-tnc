@@ -1077,6 +1077,11 @@ function tableExclues(ex){
      <td><button class="b" onclick="reintegrer('${esc(c.f.CleUnique)}')">↩️ Réintégrer</button></td></tr>`;}).join('')
     ||'<tr><td colspan="6" style="text-align:center;color:var(--g400);padding:20px">Aucune exclusion</td></tr>'}
   </tbody></table></div>`;}
+function octetsANSI(t){
+  const map={'\u20AC':128,'\u2019':146,'\u2018':145,'\u201C':147,'\u201D':148,'\u2013':150,'\u2014':151,'\u2026':133,'\u0153':156,'\u0152':140};
+  const u=new Uint8Array(t.length);let j=0;
+  for(const ch of t){const c=ch.codePointAt(0);u[j++]=c<256?c:(map[ch]||63);}
+  return u.slice(0,j);}
 function selectionCourante(){
   return candidatsImport().filter(c=>!c.exclu&&impSel.has(c.f.CleUnique)
     &&(!impFourn.size||impFourn.has(c.f.Fournisseur||'—')));}
@@ -1103,10 +1108,11 @@ function genererFichier(){
   const lg=[];sel.forEach(c=>ecritures(c).forEach(e=>lg.push(
     [e.j,dateFR(e.d),e.n,e.cpt,e.tiers,e.lib,e.st,e.sec,
      e.deb?e.deb.toFixed(2).replace('.',','):'',e.cre?e.cre.toFixed(2).replace('.',','):'',e.typ]
-    .map(v=>{const x=String(v??'');return /[;"\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(';'))));
+    .map(v=>String(v??'').replace(/[\t\r\n]+/g,' ')).join('\t'))));
   const id='IMP-'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
-  const b=new Blob(['﻿'+[COLS,...lg].join('\r\n')],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=id+(modeApp==='test'?'-TEST':'')+'.csv';a.click();
+  const b=new Blob([octetsANSI([COLS.split(';').join('\t'),...lg].join('\r\n'))],{type:'text/plain'});
+  // Format d'import Sage : « texte (séparateur : tabulation) », encodage ANSI, sans BOM
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=id+(modeApp==='test'?'-TEST':'')+'.txt';a.click();
   lots.unshift({id,date:new Date().toLocaleString('fr-FR'),user:moi(),n:sel.length,deb:t.deb,mode:modeApp});
   lots=lots.slice(0,30);lss('tnc2_lots',JSON.stringify(lots));
   (async()=>{let ko=0;
