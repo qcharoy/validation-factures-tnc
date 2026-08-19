@@ -417,7 +417,7 @@ async function chargerSage(){
     if(Array.isArray(j)){const env=j.filter(x=>x&&Array.isArray(x.pieces));
       j=env.length?env.flatMap(x=>x.pieces):j;}
     else j=j.pieces||j.data||[];
-    sage=(j||[]).map(o=>({r:String(o.r??o.ref??''),refNorm:numNorm(o.r??o.ref),
+    sage=(j||[]).map(o=>({r:String(o.r??o.ref??''),refNorm:numNorm(o.r??o.ref),s488:String(o.s488||'').trim(),
       ht:r2(Number(o.h??o.ht??0)),ttc:(o.ttc==null?null:r2(Number(o.ttc))),
       a:(o.a==null?null:r2(Number(o.a))),aux:o.aux||'',tiers:o.t??o.tiers??'',
       d:String(o.d??o.date??'').slice(0,10),
@@ -632,6 +632,13 @@ function controles(f,lg,g){
     if(abs.length)(planFiable?ko:warn).push(abs.length+' compte(s) absent(s) du plan comptable : '+abs.slice(0,3).join(', ')+(planFiable?'':' (liste PlanComptable à vérifier)'));}
   const d=anaDiff(f,lg,g);
   if(d&&!d.ok)warn.push('imputation ≠ Sage — IA : '+d.iaHors.join(', ')+' · Sage : '+d.sage.join(', '));
+  const sy=g&&String(g.s488||'').trim();
+  if(modeApp==='cible'&&g&&g.a!=null&&Math.abs(g.a)>0.005&&!sy)
+    ko.push('section analytique Yooz absente sur le 488 — saisie obligatoire');
+  if(sy){
+    const secsIA=[...new Set(lg.map(l=>sectionDe(l.EtablissementAffecte)).filter(Boolean))];
+    const autres=secsIA.filter(x=>x!==sy);
+    if(autres.length)warn.push('la section Yooz '+sy+' écrasera à l\'import '+(secsIA.length>1?'les':'la')+' section(s) IA : '+autres.join(', ')+(secsIA.length>1?' — facture multi-agences : autre process ?':''));}
   return{ko,warn,somme};}
 
 /* ── Construction des écritures d'import (488 → G → A, regroupées) ── */
@@ -645,9 +652,10 @@ function ecritures(c){
   const L=(cpt,deb,cre,typ,sec)=>out.push({j:cfg.journalImport,d:dateC,n:num,cpt,
     tiers:typ==='G'?tiers:'',lib,st:typ==='A'?cfg.structure:'',sec:sec||'',
     deb:r2(deb),cre:r2(cre),typ});
+  const secYooz=c.g&&String(c.g.s488||'').trim();   // section saisie dans Yooz sur le 488 : priorité absolue
   const parCpt={},parCptSec={};
   c.lg.forEach(l=>{const m=r2(pa(l.MontantHT));if(!m)return;
-    const cpt=String(l.CompteComptable||'').trim(),sec=sectionDe(l.EtablissementAffecte);
+    const cpt=String(l.CompteComptable||'').trim(),sec=secYooz||sectionDe(l.EtablissementAffecte);
     parCpt[cpt]=r2((parCpt[cpt]||0)+m);
     parCptSec[cpt+'|'+sec]=r2((parCptSec[cpt+'|'+sec]||0)+m);});
   L(cfg.compte488,0,c.somme,'G','');                       // 1. contrepartie 488 au crédit
@@ -1187,34 +1195,57 @@ function vFI(){
    </tbody></table></div>`;}
 
 /* ── 📋 Consignes fournisseur ── */
+/* ── 📋 Consignes & Overrides : onglets, recherche, accordéon ── */
+let coTab='c',coQ='',coOuverts=new Set();
+function coToggle(id){id=String(id);coOuverts.has(id)?coOuverts.delete(id):coOuverts.add(id);rendre();}
 function vCO(){
   const $=document.getElementById('vue');
   if(!consignes){$.innerHTML=`<h1>📋 Consignes fournisseur</h1><div class="chargeur"><span class="spin"></span>Chargement…</div>`;return;}
-  const lst=consignes.slice().sort((a,b)=>(a.motif||'').localeCompare(b.motif||''));
+  const q=coQ.toLowerCase().trim();
+  const lst=consignes.filter(c=>!q||String(c.motif||'').toLowerCase().includes(q)
+      ||String(c.siren||'').includes(q)||String(c.texte||'').toLowerCase().includes(q))
+    .sort((a,b)=>(a.motif||'').localeCompare(b.motif||''));
   window._coTri=lst;
-  $.innerHTML=`<h1>📋 Consignes fournisseur</h1>
-   <div class="sous">Ces textes sont lus par l'IA à chaque lecture de facture. Après modification : 💾 Enregistrer puis 🔄 Relire les factures concernées.</div>
-   <div class="twrap"><table><thead><tr><th style="width:190px">Fournisseur (motif)</th><th style="width:110px">SIREN</th><th>Consigne (modifiable)</th><th style="width:150px"></th></tr></thead><tbody>
-   ${lst.map((c,i)=>`<tr style="${c.actif?'':'opacity:.5'}">
-     <td style="font-weight:600;vertical-align:top">${esc(c.motif||'—')}${c.actif?'':' <span class="tag g">inactive</span>'}</td>
-     <td class="mono" style="vertical-align:top">${esc(c.siren||'—')}</td>
-     <td><textarea id="co-${i}" style="width:100%;min-height:64px;font-size:12px">${esc(c.texte||'')}</textarea></td>
-     <td style="white-space:nowrap;vertical-align:top">
-       <button class="b principal" onclick="sauverConsigneIdx(${i})">💾 Enregistrer</button><br>
-       <button class="b" style="margin-top:5px" onclick='retraiterFournisseur(${JSON.stringify(c.motif||'')})'>🔄 Relire</button></td>
-    </tr>`).join('')||'<tr><td colspan="4" style="text-align:center;color:var(--g400);padding:20px">Liste vide ou inaccessible</td></tr>'}
-   </tbody></table></div>
-   ${sectionOverrides()}`;}
-function sectionOverrides(){
-  if(!overrides)return '';
-  const lst=overrides.slice().sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
-  window._ovTri=lst;
+  const ov=(overrides||[]).filter(o=>!q||String(o.nom||'').toLowerCase().includes(q)
+      ||String(o.siret||'').includes(q)||String(o.agence||'').toLowerCase().includes(q))
+    .sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
+  window._ovTri=ov;
+  $.innerHTML=`<h1>📋 Référentiels IA</h1>
+   <div class="sous">Consignes lues par l'IA à chaque facture · overrides = agence forcée par fournisseur. Après modification : 💾 puis 🔄 relire.</div>
+   <div class="barre">
+     <button class="b ${coTab==='c'?'on':''}" onclick="coTab='c';rendre()">📋 Consignes (${consignes.length})</button>
+     <button class="b ${coTab==='o'?'on':''}" onclick="coTab='o';rendre()">🎯 Overrides établissement (${(overrides||[]).length})</button>
+     <input type="text" placeholder="🔎 fournisseur, SIREN, texte…" value="${esc(coQ)}"
+       style="flex:1;max-width:340px;margin-left:8px"
+       oninput="coQ=this.value;clearTimeout(window._cq);window._cq=setTimeout(rendre,250)">
+     <span style="font-size:11.5px;color:var(--g400)">${coTab==='c'?lst.length+' consigne(s)':ov.length+' override(s)'}${q?' trouvée(s)':''}</span>
+     ${coOuverts.size?`<button class="b" onclick="coOuverts=new Set();rendre()">Tout replier</button>`:''}
+   </div>
+   ${coTab==='c'?tabConsignes(lst,q):tabOverrides(ov)}`;}
+function tabConsignes(lst,q){
+  if(!lst.length)return `<div class="vide"><div class="gi">🔎</div><div class="gt">Aucune consigne ne correspond${q?' à « '+esc(q)+' »':''}</div></div>`;
+  return lst.slice(0,150).map((c,i)=>{
+    const open=coOuverts.has(String(c._id));
+    return `<div style="border:1px solid ${open?'var(--vert)':'var(--g200)'};border-radius:9px;margin-bottom:6px;overflow:hidden;${c.actif?'':'opacity:.55'}">
+     <div onclick="coToggle('${esc(String(c._id))}')" style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:${open?'var(--vert-l)':'#fff'}">
+       <span style="color:var(--g400)">${open?'▾':'▸'}</span>
+       <b style="min-width:200px">${esc(c.motif||'—')}</b>
+       <span class="mono" style="font-size:11px;color:var(--g400);min-width:90px">${esc(c.siren||'')}</span>
+       ${c.actif?'':'<span class="tag g">inactive</span>'}
+       ${open?'':`<span style="font-size:11.5px;color:var(--g400);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1">${esc(String(c.texte||'').slice(0,110))}</span>`}
+     </div>
+     ${open?`<div style="padding:10px 12px;border-top:1px solid var(--g100)">
+       <textarea id="co-${i}" style="width:100%;min-height:110px;font-size:12px">${esc(c.texte||'')}</textarea>
+       <div style="display:flex;gap:7px;margin-top:7px;justify-content:flex-end">
+         <button class="b" onclick='retraiterFournisseur(${JSON.stringify(c.motif||'')})'>🔄 Relire les factures</button>
+         <button class="b principal" onclick="sauverConsigneIdx(${i})">💾 Enregistrer</button>
+       </div></div>`:''}
+    </div>`;}).join('')+(lst.length>150?`<div style="font-size:11px;color:var(--g400);padding:8px">Affichage limité à 150 — précisez la recherche.</div>`:'');}
+function tabOverrides(ov){
   const agOpts=a=>'<option value=""></option>'+Object.keys(mapAna).sort().map(x=>`<option ${a===x?'selected':''}>${esc(x)}</option>`).join('');
-  return `<h1 style="font-size:15px;margin:22px 0 2px">🎯 Overrides d'établissement (${lst.filter(o=>o.actif).length} actifs)</h1>
-   <div class="sous">Force l'agence d'un fournisseur (prioritaire sur son code postal). Un chantier identifié sur une ligne reste prioritaire sur l'override.
-     Matching par SIRET d'abord, puis par nom. Après modification : 💾 puis 🔄 relire les factures.</div>
+  return `<div class="sous" style="margin:4px 0 8px">Force l'agence d'un fournisseur (prioritaire sur son code postal ; un chantier identifié par ligne prime toujours). Matching SIRET d'abord, puis nom.</div>
    <div class="twrap"><table><thead><tr><th style="width:220px">Fournisseur (nom)</th><th style="width:140px">SIRET / SIREN</th><th style="width:230px">Agence forcée</th><th style="width:60px">Actif</th><th style="width:190px"></th></tr></thead><tbody>
-   ${lst.map((o,i)=>`<tr style="${o.actif?'':'opacity:.5'}">
+   ${ov.slice(0,150).map((o,i)=>`<tr style="${o.actif?'':'opacity:.5'}">
      <td><input type="text" id="ov-n-${i}" style="width:100%" value="${esc(o.nom)}"></td>
      <td><input type="text" class="mono" id="ov-s-${i}" style="width:100%" value="${esc(o.siret)}"></td>
      <td><select id="ov-a-${i}" style="width:100%">${agOpts(o.agence)}</select>
@@ -1457,6 +1488,7 @@ function rendreFiche(f,lg){
      ${rS!=null?gi(libRef()+' (Sage)'+(g&&g.refNorm!==numNorm(f.NumeroFacture)?' · pièce '+esc(g.r):''),fa(rS)+' €'):gi('Sage','non rapprochée')}
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
      ${g&&g.aux?gi('Tiers Sage (CT_Num)','<span class="mono">'+esc(g.aux)+'</span>'+(g.tiers?' · '+esc(g.tiers):'')):''}
+     ${g&&g.s488?gi('Agence Yooz (488) — fait foi à l\'import','<span class="mono" style="color:var(--vert);font-weight:700">'+esc(g.s488)+'</span>'):''}
    </div>
    ${c.ko.length?`<div class="alerte">⚠️ ${c.ko.map(esc).join(' · ')}</div>`:''}
    ${(c.warn||[]).length?`<div class="alerte" style="border-left-color:var(--orange);background:var(--orange-l);color:#7a5200">🟠 ${(c.warn||[]).map(esc).join(' · ')} — alerte seulement, n'empêche pas l'import</div>`:''}
