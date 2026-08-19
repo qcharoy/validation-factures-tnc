@@ -1100,6 +1100,8 @@ function previsualiser(){
    <button class="b principal" onclick="closeMo();genererFichier()">📤 Générer</button></div>`,true);}
 function genererFichier(){
   const sel=selectionCourante();if(!sel.length)return;
+  genererLot(sel,()=>{impSel=new Set();});}
+function genererLot(sel,apres){
   const t=totaux(sel);const refT=r2(sel.reduce((s,c)=>s+(refSage(c.g)||0),0));
   if(!confirm(`RÉCAPITULATIF AVANT GÉNÉRATION\n\n${sel.length} facture(s) — mode ${modeApp==='cible'?'CIBLE (488600 HT)':'TEST (401 TTC)'}\n`+
     `Total import : ${fa(t.deb)} €\nTotal ${libRef()} : ${fa(refT)} €\nÉcart : ${fa(r2(t.deb-refT))} €\n\n`+
@@ -1128,7 +1130,22 @@ function genererFichier(){
   journaliser('LOT|'+id,'',sel.map(c=>({cible:'Facture '+(c.f.NumeroFacture||''),champ:'Import Sage',avant:'',apres:id})),
     'Génération fichier import — mode '+modeApp);
   toast(`📤 ${id} — ${sel.length} facture(s), ${lg.length} lignes, ${fa(t.deb)} € équilibrés`);
-  impSel=new Set();rendre();}
+  if(apres)apres();rendre();}
+/* Génération depuis la fiche : une seule facture */
+function genererFacture(cle){
+  const f=rows.find(r=>r.CleUnique===cle);if(!f)return;
+  const ee=etatExport(f);
+  if(ee){toast('⛔ Déjà exportée ('+ee.lot+') — déverrouillez d\'abord dans Import Sage → Lots générés');return;}
+  const R=sage&&lignes?rapprocher():null;
+  const x=R?(R.ok.find(y=>y.f.CleUnique===cle)||R.ecarts.find(y=>y.f.CleUnique===cle)):null;
+  const g=(x&&x.g)||pieceDe(f);
+  const lg=lignesDe(cle);
+  const c=controles(f,lg,g);
+  if(x&&x.ecart)c.ko.unshift(`écart ${libRef()} de ${fa(x.ecart)} €`);
+  if(!g)c.ko.unshift('facture non rapprochée à une pièce Sage');
+  if(c.ko.length){toast('⛔ Import impossible : '+c.ko.join(' · '),8000);return;}
+  fermerFiche();
+  genererLot([{f,g,lg,ko:[],warn:c.warn||[],somme:c.somme}]);}
 /* ── 📐 Fiabilité ── */
 function vFI(){
   const $=document.getElementById('vue');const bloc=sourcesPretes();
@@ -1424,7 +1441,8 @@ function rendreFiche(f,lg){
     (String(f.LienFacture||'').startsWith('http')?`<button class="b" onclick="ouvrirPDF('${esc(f.LienFacture)}')">📄 PDF</button>`:'')+
     `<button class="b" onclick="retraiterUne('${esc(f.CleUnique)}')">🔄 Renvoyer à l'IA</button>
      <button class="b" onclick="analyserFiche('${esc(f.CleUnique)}')">🔎 Analyse IA</button>
-     <button class="b" onclick="histFiche('${esc(f.CleUnique)}')">🕘 Historique</button>`;
+     <button class="b" onclick="histFiche('${esc(f.CleUnique)}')">🕘 Historique</button>
+     <button class="b principal" onclick="genererFacture('${esc(f.CleUnique)}')">📤 Import Sage</button>`;
   const gi=(k,v)=>`<div class="gitem"><div class="gk">${k}</div><div class="gv">${v||'—'}</div></div>`;
   const ge=(k,ch,type)=>`<div class="gitem"><div class="gk">${k} ✎</div>
     <input type="${type||'text'}" style="width:${type==='date'?'130px':'100px'};font-size:12.5px;padding:3px 6px;${type==='date'?'':'text-align:right'}"
