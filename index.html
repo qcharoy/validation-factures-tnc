@@ -1110,7 +1110,11 @@ function genererFichier(){
      e.deb?e.deb.toFixed(2).replace('.',','):'',e.cre?e.cre.toFixed(2).replace('.',','):'',e.typ]
     .map(v=>String(v??'').replace(/[\t\r\n]+/g,' ')).join('\t'))));
   const id='IMP-'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
-  const b=new Blob([octetsANSI([COLS.split(';').join('\t'),...lg].join('\r\n'))],{type:'text/plain'});
+  // Sage plante sur les lignes vides : toute ligne sans contenu est filtrée et le
+  // fichier se termine PILE après la dernière écriture — aucun retour chariot final.
+  const contenu=[COLS.split(';').join('\t'),...lg].filter(l=>String(l).trim().length)
+    .join('\r\n');
+  const b=new Blob([octetsANSI(contenu)],{type:'text/plain'});
   // Format d'import Sage : « texte (séparateur : tabulation) », encodage ANSI, sans BOM
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=id+(modeApp==='test'?'-TEST':'')+'.txt';a.click();
   lots.unshift({id,date:new Date().toLocaleString('fr-FR'),user:moi(),n:sel.length,deb:t.deb,mode:modeApp});
