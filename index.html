@@ -874,6 +874,58 @@ function tabAnas(anas){
      <td><button class="b" onclick="ouvrirFiche('${esc(y.x.f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')
     ||'<tr><td colspan="5" style="text-align:center;color:var(--g400);padding:18px">Aucune divergence d\'imputation 🎉</td></tr>'}
    </tbody></table></div>`;}
+/* ── 📬 Recherche de l'email d'origine (pièces non lues) ── */
+async function chercherUne(i){
+  const x=rapprocher().manquantes[i];if(!x)return;
+  const ref=String(x.g.r||'').trim();
+  const b=document.getElementById('mb-'+i);
+  if(b){b.disabled=true;b.textContent='⏳ Recherche…';}
+  try{const r=await fetch(cfg.whChercher,{method:'POST',headers:enTetesN8n(),
+      body:JSON.stringify({pieces:[{ref,tiers:x.g.tiers||'',aux:x.g.aux||'',date:x.g.d||'',montant:refSage(x.g)}],utilisateur:moi()})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    let d=await r.json();if(Array.isArray(d))d=d[0]||{};
+    const cands=d.candidats||[];
+    if(b){b.disabled=false;b.textContent='📬 Email';}
+    if(!cands.length){toast('📭 '+ref+' : aucun email avec PJ dans la boîte depuis le début du mois comptable');return;}
+    window._mbCands=cands;window._mbCtx={i,ref};
+    openMo(`<h3>📬 ${cands.length} email(s) candidat(s) — pièce ${esc(ref)}</h3>
+     <div class="sous">${esc(x.g.tiers||x.g.aux||'')} · ${fa(refSage(x.g))} € · vérifiez expéditeur et pièces jointes avant d'envoyer au worker</div>
+     ${cands.map((c,k2)=>`<div style="border:1.5px solid ${c.refVisible?'var(--vert)':'var(--g200)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;background:${c.refVisible?'var(--vert-l)':'#fff'}">
+       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+         <b style="font-size:13px">${esc(c.sujet||'(sans objet)')}</b>
+         ${c.refVisible?'<span class="tag v">réf. dans le sujet/corps</span>':'<span class="tag o">réf. trouvée ailleurs (nom de PJ ?)</span>'}
+       </div>
+       <div style="font-size:12px;color:var(--g500);margin:3px 0">${esc(c.de||'')} &lt;${esc(c.adresse||'')}&gt; · reçu le ${fd(c.recu)}</div>
+       <div style="margin:5px 0">${(c.pjs||[]).map(p=>`<span class="tag ${/\.pdf$/i.test(p.nom)?'b':'g'}" style="margin:0 4px 4px 0;display:inline-block">📎 ${esc(p.nom)} · ${p.ko} Ko</span>`).join('')||'<span class="tag g">PJ non listées</span>'}</div>
+       <div style="text-align:right"><button class="b principal" onclick="envoyerCandidat(${k2})">📤 C'est celui-là — envoyer au worker</button></div>
+     </div>`).join('')}
+     <div style="text-align:right;margin-top:8px"><button class="b" onclick="closeMo()">Aucun ne correspond</button></div>`,true);}
+  catch(e){toast('⛔ '+e.message+' — le workflow MAILBOX-ABSENTES est-il actif ? Clé saisie dans ⚙️ ?');
+    if(b){b.disabled=false;b.textContent='📬 Email';}}}
+async function envoyerCandidat(k2){
+  const c=(window._mbCands||[])[k2];const ctx=window._mbCtx||{};if(!c)return;
+  closeMo();
+  try{const r=await fetch(cfg.whTraiter,{method:'POST',headers:enTetesN8n(),
+      body:JSON.stringify({emailMessageId:c.id,ref:ctx.ref,utilisateur:moi()})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    journaliser('PIECE|'+ctx.ref,'',[{cible:'Boîte compta',champ:'Email envoyé au worker',avant:'',
+      apres:(c.sujet||'').slice(0,120)}],'Email confirmé manuellement — pièce non lue');
+    toast('📤 Email transféré vers la boîte de lecture — l\'orchestrateur le prend en charge d\'ici 5 min, je surveille…',7000);
+    suivreUne(ctx.i,ctx.ref);}
+  catch(e){toast('⛔ '+e.message);}}
+async function suivreUne(i,ref){
+  const refN=numNorm(ref);const t0=Date.now();
+  while(Date.now()-t0<15*60000){
+    await new Promise(r=>setTimeout(r,30000));
+    try{await chargerFactures();}catch(e){continue;}
+    if(rows.some(f=>numNorm(f.NumeroFacture)===refN)){
+      toast('✅ '+ref+' — email retrouvé, facture lue par l\'IA');
+      rafraichirLignesFond();_rap=null;rendre();return;}
+    const b=document.getElementById('mb-'+i);
+    if(b)b.textContent='⏳ '+Math.max(1,Math.round((Date.now()-t0)/60000))+' min…';}
+  toast('📬 '+ref+' : rien après 15 min — email introuvable dans la boîte (ou lecture IA en échec, voir logs n8n).',9000);
+  const b=document.getElementById('mb-'+i);
+  if(b){b.disabled=false;b.textContent='📬 Réessayer';}}
 function analyserEcartIdx(i){const R=rapprocher();
   const x=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart))[i];
   if(x)analyserIA(x.f.CleUnique,{g:x.g,ecart:x.ecart});}
