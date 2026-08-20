@@ -219,7 +219,7 @@ const CFG_DEF={
   whTraiter:'https://tri-n-collect.app.n8n.cloud/webhook/traiter-email',
   whRetraiter:'https://tri-n-collect.app.n8n.cloud/webhook/retraiter',
   whAnalyse:'https://tri-n-collect.app.n8n.cloud/webhook/analyser-ecart',
-  journalImport:'ACC', compte488:'48860000', structure:'1'
+  journalImport:'IA', compte488:'48860000', structure:'1'
 };
 const cfg=new Proxy({},{get:(_,k)=>lgs('tnc2_'+k)||CFG_DEF[k]||''});
 function setCfg(k,v){lss('tnc2_'+k,v);}
@@ -371,8 +371,13 @@ function barrePer(){
 const CHAMPS_FACT='CleUnique,NumeroFacture,Fournisseur,SIRET,Typededocument,DateFacture,DateEcheance,TotalHT,TVA,TotalTTC,EtablissementAffecte,LienFacture,Statut,DateTraitement,Created,Modified';
 const CHAMPS_LIGNE='CleUnique,Cl_x00e9_UniqueLigne,NumeroLigne,Designation,Quantite,PUHT,MontantHT,CompteComptable,EtablissementAffecte,Mati_x00e8_re,NumBon,Chantier,DateRotation';
 
+let libColOk=true;
 async function chargerFactures(){
-  const items=await gTout(`/sites/${cfg.site}/lists/${cfg.lFactures}/items?$expand=fields($select=${CHAMPS_FACT})&$top=999`);
+  let items;
+  try{items=await gTout(`/sites/${cfg.site}/lists/${cfg.lFactures}/items?$expand=fields($select=${CHAMPS_FACT},LibelleEcriture)&$top=999`);libColOk=true;}
+  catch(e){ // colonne LibelleEcriture pas encore créée dans la liste : on charge sans elle
+    items=await gTout(`/sites/${cfg.site}/lists/${cfg.lFactures}/items?$expand=fields($select=${CHAMPS_FACT})&$top=999`);
+    libColOk=false;console.warn('[factures] colonne LibelleEcriture absente — libellé auto seulement');}
   rows=items.map(it=>({_id:it.id,...(it.fields||{})}));
   document.getElementById('sync').textContent='Sync '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});}
 
@@ -635,13 +640,25 @@ function controles(f,lg,g){
   return{ko,warn,somme};}
 
 /* ── Construction des écritures d'import (488 → G → A, regroupées) ── */
+/* Libellé automatique : fournisseur + période (lue sur les lignes si le
+   fournisseur l'indique, sinon mois de la date de facture). Sans numéro de
+   facture — il a sa colonne dédiée (demande DAF/Anne du 20/08). */
+function libAuto(f,lg){
+  const four=String(f.Fournisseur||'').slice(0,40);
+  let per='';
+  for(const l of(lg||[])){
+    const m=String(l.Designation||'').match(/du\s+(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})\s+au\s+(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i);
+    if(m){per='du '+m[1]+' au '+m[2];break;}}
+  if(!per){const d=String(f.DateFacture||'').slice(0,10);
+    if(d)per=d.slice(5,7)+'/'+d.slice(0,4);}
+  return (four+(per?' '+per:'')).slice(0,69);}
 const COLS='JOURNAL;Date comptable;N° de facture ;N° compte general;N° compte tiers;Libellé écriture;N° ;N° section ;Débit ;Crédit ;Type';
 function ecritures(c){
   const f=c.f,out=[];const dateC=(f.DateFacture||'').slice(0,10);
   const num=String(f.NumeroFacture||'').slice(0,30);
   const four=String(f.Fournisseur||'').slice(0,40);
   const tiers=c.g&&c.g.aux?String(c.g.aux).trim():'';
-  const lib=(four+' - '+num).slice(0,60);
+  const lib=String(f.LibelleEcriture||'').trim().slice(0,69)||libAuto(f,c.lg);
   const L=(cpt,deb,cre,typ,sec)=>out.push({j:cfg.journalImport,d:dateC,n:num,cpt,
     tiers:typ==='G'?tiers:'',lib,st:typ==='A'?cfg.structure:'',sec:sec||'',
     deb:r2(deb),cre:r2(cre),typ});
@@ -1482,6 +1499,10 @@ function rendreFiche(f,lg){
    <div class="grille">
      ${ge('Date facture','DateFacture','date')}${ge('Échéance','DateEcheance','date')}${gi('Statut',esc(f.Statut||'—'))}
      ${ge('TTC lu par l\'IA','TotalTTC')}${ge('HT lu','TotalHT')}${ge('TVA lue','TVA')}
+     <div class="gitem" style="grid-column:span 2"><div class="gk">Libellé écriture Sage ✎${libColOk?'':' — <span style=\"color:var(--rouge)\">colonne LibelleEcriture à créer dans la liste Factures</span>'}</div>
+       <input type="text" style="width:100%;font-size:12.5px;padding:3px 6px" maxlength="69"
+         value="${esc(f.LibelleEcriture||'')}" placeholder="${esc(libAuto(f,lg))}"
+         onchange="majEntete('LibelleEcriture',this.value);this.classList.add('mod')"></div>
      ${gi('Σ lignes HT',fa(c.somme)+' €')}
      ${rS!=null?gi(libRef()+' (Sage)'+(g&&g.refNorm!==numNorm(f.NumeroFacture)?' · pièce '+esc(g.r):''),fa(rS)+' €'):gi('Sage','non rapprochée')}
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
@@ -1551,7 +1572,7 @@ function analyserFiche(cle){
   analyserIA(cle,x?{g:x.g,ecart:x.ecart||0}:null);}
 function majEntete(champ,val){
   const f=window._ficheF;if(!f)return;
-  const apres=champ.startsWith('Date')?val:pa(val);
+  const apres=['TotalTTC','TotalHT','TVA'].includes(champ)?pa(val):val;
   ficheDirty['E|'+champ]={ent:true,champ,avant:f[champ],apres};
   const n=Object.keys(ficheDirty).length;
   const b=document.getElementById('fsave');if(b){b.disabled=!n;b.textContent=`💾 Enregistrer (${n})`;}}
