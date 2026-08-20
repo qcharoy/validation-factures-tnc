@@ -417,7 +417,7 @@ async function chargerSage(){
     if(Array.isArray(j)){const env=j.filter(x=>x&&Array.isArray(x.pieces));
       j=env.length?env.flatMap(x=>x.pieces):j;}
     else j=j.pieces||j.data||[];
-    sage=(j||[]).map(o=>({r:String(o.r??o.ref??''),refNorm:numNorm(o.r??o.ref),s488:String(o.s488||'').trim(),
+    sage=(j||[]).map(o=>({r:String(o.r??o.ref??''),refNorm:numNorm(o.r??o.ref),
       ht:r2(Number(o.h??o.ht??0)),ttc:(o.ttc==null?null:r2(Number(o.ttc))),
       a:(o.a==null?null:r2(Number(o.a))),aux:o.aux||'',tiers:o.t??o.tiers??'',
       d:String(o.d??o.date??'').slice(0,10),
@@ -632,13 +632,6 @@ function controles(f,lg,g){
     if(abs.length)(planFiable?ko:warn).push(abs.length+' compte(s) absent(s) du plan comptable : '+abs.slice(0,3).join(', ')+(planFiable?'':' (liste PlanComptable à vérifier)'));}
   const d=anaDiff(f,lg,g);
   if(d&&!d.ok)warn.push('imputation ≠ Sage — IA : '+d.iaHors.join(', ')+' · Sage : '+d.sage.join(', '));
-  const sy=g&&String(g.s488||'').trim();
-  if(modeApp==='cible'&&g&&g.a!=null&&Math.abs(g.a)>0.005&&!sy)
-    ko.push('section analytique Yooz absente sur le 488 — saisie obligatoire');
-  if(sy){
-    const secsIA=[...new Set(lg.map(l=>sectionDe(l.EtablissementAffecte)).filter(Boolean))];
-    const autres=secsIA.filter(x=>x!==sy);
-    if(autres.length)warn.push('la section Yooz '+sy+' écrasera à l\'import '+(secsIA.length>1?'les':'la')+' section(s) IA : '+autres.join(', ')+(secsIA.length>1?' — facture multi-agences : autre process ?':''));}
   return{ko,warn,somme};}
 
 /* ── Construction des écritures d'import (488 → G → A, regroupées) ── */
@@ -652,10 +645,9 @@ function ecritures(c){
   const L=(cpt,deb,cre,typ,sec)=>out.push({j:cfg.journalImport,d:dateC,n:num,cpt,
     tiers:typ==='G'?tiers:'',lib,st:typ==='A'?cfg.structure:'',sec:sec||'',
     deb:r2(deb),cre:r2(cre),typ});
-  const secYooz=c.g&&String(c.g.s488||'').trim();   // section saisie dans Yooz sur le 488 : priorité absolue
   const parCpt={},parCptSec={};
   c.lg.forEach(l=>{const m=r2(pa(l.MontantHT));if(!m)return;
-    const cpt=String(l.CompteComptable||'').trim(),sec=secYooz||sectionDe(l.EtablissementAffecte);
+    const cpt=String(l.CompteComptable||'').trim(),sec=sectionDe(l.EtablissementAffecte);
     parCpt[cpt]=r2((parCpt[cpt]||0)+m);
     parCptSec[cpt+'|'+sec]=r2((parCptSec[cpt+'|'+sec]||0)+m);});
   L(cfg.compte488,0,c.somme,'G','');                       // 1. contrepartie 488 au crédit
@@ -826,32 +818,29 @@ function vTB(){
    </div>`;}
 
 /* ── 🔍 Écarts ── */
+let ecTab='m';
 function vEC(){
   const $=document.getElementById('vue');const bloc=sourcesPretes();
   if(bloc){$.innerHTML=`<h1>🔍 Écarts</h1>${barrePer()}${bloc}`;return;}
   const R=rapprocher();
   const le=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart));
-  const lm=R.manquantes.slice(0,200);
+  const lm=R.manquantes;
+  const anas=[...R.ok,...R.ecarts].map(x=>({x,d:anaDiff(x.f,lignesDe(x.f.CleUnique),x.g)})).filter(y=>y.d&&!y.d.ok);
+  const carte=(tab,cl,n,l,e)=>`<div class="carte ${cl} click" ${ecTab===tab?'style="outline:2.5px solid var(--vert)"':''} onclick="ecTab='${tab}';rendre()">
+    <div class="v">${n}</div><div class="l">${l}</div><div class="e">${e}</div></div>`;
   $.innerHTML=`<h1>🔍 Écarts</h1>
-   <div class="sous">Montants IA vs ${libRef()} — tout est affiché brut${modeApp==='test'?' (les écarts de TVA sont attendus en mode test)':''}</div>
+   <div class="sous">Montants IA vs ${libRef()}${modeApp==='test'?' — les écarts de TVA sont attendus en mode test':''} · cliquez une carte pour afficher la liste correspondante</div>
    ${barrePer()}
    <div class="cartes">
-    <div class="carte co"><div class="v">${le.length}</div><div class="l">Écarts de montant</div><div class="e">${fa(le.reduce((s,x)=>s+Math.abs(x.ecart),0))} € cumulés</div></div>
-    <div class="carte cr"><div class="v">${R.manquantes.length}</div><div class="l">Non lues par l'IA</div><div class="e">présentes dans Sage seulement</div></div>
+    ${carte('m','co',le.length,'Écarts de montant',fa(le.reduce((s2,x)=>s2+Math.abs(x.ecart),0))+' € cumulés')}
+    ${carte('nl','cr',lm.length,"Non lues par l'IA",'présentes dans Sage seulement')}
+    ${carte('ana','cb',anas.length,'Imputation ≠ Sage','montants justes, sections différentes')}
     <div class="carte cv"><div class="v">${R.ok.length}</div><div class="l">Justes au centime</div><div class="e">aucune action</div></div>
    </div>
-   ${(()=>{const anas=[...R.ok,...R.ecarts].map(x=>({x,d:anaDiff(x.f,lignesDe(x.f.CleUnique),x.g)})).filter(y=>y.d&&!y.d.ok);
-     window._anasN=anas.length;
-     return anas.length?`<h1 style="font-size:14px;margin-bottom:6px">Imputation analytique différente de Sage (${anas.length})</h1>
-      <div class="sous">Montants cohérents mais sections différentes — alerte seulement. Cas typique : double code d'agence (Bayonne 4001/4002).</div>
-      <div class="twrap" style="margin-bottom:18px"><table><thead><tr><th>N° pièce</th><th>Fournisseur</th><th>Sections IA</th><th>Sections Sage</th><th></th></tr></thead><tbody>
-      ${anas.slice(0,100).map(y=>`<tr><td class="mono">${esc(y.x.g.r)}</td><td>${esc(y.x.f.Fournisseur||'—')}</td>
-        <td>${y.d.ia.map(sc=>`<span class="tag ${y.d.iaHors.includes(sc)?'o':'g'}" style="margin-right:3px">${esc(sc)}</span>`).join('')}</td>
-        <td>${y.d.sage.map(sc=>`<span class="tag g" style="margin-right:3px">${esc(sc)}</span>`).join('')}</td>
-        <td><button class="b" onclick="ouvrirFiche('${esc(y.x.f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')}
-      </tbody></table></div>`:''})()}
-   <h1 style="font-size:14px;margin-bottom:6px">Écarts de montant (${le.length})</h1>
-   <div class="twrap" style="margin-bottom:18px"><table><thead><tr>
+   ${ecTab==='m'?tabMontants(le):ecTab==='nl'?tabNonLues(lm):tabAnas(anas)}`;}
+function tabMontants(le){
+  return `<h1 style="font-size:14px;margin-bottom:6px">Écarts de montant (${le.length})</h1>
+   <div class="twrap"><table><thead><tr>
      <th>N° pièce</th><th>Fournisseur</th><th>Tiers Sage (CT_Num)</th><th class="dr">Montant IA</th><th class="dr">Montant Sage</th><th class="dr">Écart</th><th></th></tr></thead><tbody>
     ${le.map((x,i)=>`<tr>
       <td class="mono">${esc(x.g.r)}</td><td>${esc(x.f.Fournisseur||'—')}</td>
@@ -863,71 +852,28 @@ function vEC(){
         <button class="b" onclick="ouvrirFiche('${esc(x.f.CleUnique)}')">Ouvrir</button>
         <button class="b" title="Analyse IA de l'écart" onclick="analyserEcartIdx(${i})">🔎 Analyser</button>
         <button class="b" title="Retraiter le fournisseur" onclick='retraiterFournisseur(${JSON.stringify(x.f.Fournisseur||'')})'>🔄</button>
-      </td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:18px">Aucun écart 🎉</td></tr>'}
-   </tbody></table></div>
-   <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-     <h1 style="font-size:14px;margin:0">Dans Sage mais jamais lues par l'IA (${R.manquantes.length})</h1>
-     ${R.manquantes.length?`<span style="font-size:11px;color:var(--g400)">📬 retrouve l'email d'origine dans la boîte compta et l'envoie au worker</span>`:''}
-   </div>
+      </td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:18px">Aucun écart de montant 🎉</td></tr>'}
+   </tbody></table></div>`;}
+function tabNonLues(lm){
+  return `<h1 style="font-size:14px;margin-bottom:6px">Dans Sage mais jamais lues par l'IA (${lm.length}) <span style="font-size:11px;font-weight:400;color:var(--g400)">📬 retrouve l'email d'origine dans la boîte compta et l'envoie au worker</span></h1>
    <div class="twrap"><table><thead><tr><th>N° pièce</th><th>Tiers (CT_Num)</th><th>Intitulé tiers</th><th>Date</th><th class="dr">${libRef()}</th><th>Comptes Sage</th><th></th></tr></thead><tbody>
-    ${lm.map((x,i)=>`<tr><td class="mono">${esc(x.g.r)}</td><td class="mono">${esc(x.g.aux||'—')}</td><td>${esc(x.g.tiers||'—')}</td>
+    ${lm.slice(0,200).map((x,i)=>`<tr><td class="mono">${esc(x.g.r)}</td><td class="mono">${esc(x.g.aux||'—')}</td><td>${esc(x.g.tiers||'—')}</td>
       <td>${fd(x.g.d)}</td><td class="dr">${fa(refSage(x.g))} €</td>
       <td style="font-size:11px;color:var(--g400)">${esc((x.g.comptes||[]).slice(0,3).join(', '))}</td>
       <td>${String(x.g.r).trim().length>=6?`<button class="b" id="mb-${i}" onclick="chercherUne(${i})">📬 Email</button>`
-          :'<span style="font-size:10px;color:var(--g400)" title="Référence trop courte : trop de faux positifs, recherche refusée">réf. trop courte</span>'}</td></tr>`).join('')
+          :'<span style="font-size:10px;color:var(--g400)" title="Trop de faux positifs : recherche refusée">réf. trop courte</span>'}</td></tr>`).join('')
      ||'<tr><td colspan="7" style="text-align:center;color:var(--g400);padding:18px">Tout est lu ✅</td></tr>'}
    </tbody></table></div>`;}
-async function chercherUne(i){
-  const x=rapprocher().manquantes[i];if(!x)return;
-  const ref=String(x.g.r||'').trim();
-  const b=document.getElementById('mb-'+i);
-  if(b){b.disabled=true;b.textContent='⏳ Recherche…';}
-  try{const r=await fetch(cfg.whChercher,{method:'POST',headers:enTetesN8n(),
-      body:JSON.stringify({pieces:[{ref,tiers:x.g.tiers||'',aux:x.g.aux||'',date:x.g.d||'',montant:refSage(x.g)}],utilisateur:moi()})});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    let d=await r.json();if(Array.isArray(d))d=d[0]||{};
-    const cands=d.candidats||[];
-    if(b){b.disabled=false;b.textContent='📬 Email';}
-    if(!cands.length){toast('📭 '+ref+' : aucun email avec PJ dans la boîte depuis le début du mois comptable');return;}
-    window._mbCands=cands;window._mbCtx={i,ref};
-    openMo(`<h3>📬 ${cands.length} email(s) candidat(s) — pièce ${esc(ref)}</h3>
-     <div class="sous">${esc(x.g.tiers||x.g.aux||'')} · ${fa(refSage(x.g))} € · vérifiez expéditeur et pièces jointes avant d'envoyer au worker</div>
-     ${cands.map((c,k)=>`<div style="border:1.5px solid ${c.refVisible?'var(--vert)':'var(--g200)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;background:${c.refVisible?'var(--vert-l)':'#fff'}">
-       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-         <b style="font-size:13px">${esc(c.sujet||'(sans objet)')}</b>
-         ${c.refVisible?'<span class="tag v">réf. dans le sujet/corps</span>':'<span class="tag o">réf. trouvée ailleurs (nom de PJ ?)</span>'}
-       </div>
-       <div style="font-size:12px;color:var(--g500);margin:3px 0">${esc(c.de||'')} &lt;${esc(c.adresse||'')}&gt; · reçu le ${fd(c.recu)}</div>
-       <div style="margin:5px 0">${(c.pjs||[]).map(p=>`<span class="tag ${/\.pdf$/i.test(p.nom)?'b':'g'}" style="margin:0 4px 4px 0;display:inline-block">📎 ${esc(p.nom)} · ${p.ko} Ko</span>`).join('')||'<span class="tag g">PJ non listées</span>'}</div>
-       <div style="text-align:right"><button class="b principal" onclick="envoyerCandidat(${k})">📤 C'est celui-là — envoyer au worker</button></div>
-     </div>`).join('')}
-     <div style="text-align:right;margin-top:8px"><button class="b" onclick="closeMo()">Aucun ne correspond</button></div>`,true);}
-  catch(e){toast('⛔ '+e.message+' — le workflow MAILBOX-ABSENTES v2 est-il actif ?');
-    if(b){b.disabled=false;b.textContent='📬 Email';}}}
-async function envoyerCandidat(k){
-  const c=(window._mbCands||[])[k];const ctx=window._mbCtx||{};if(!c)return;
-  closeMo();
-  try{const r=await fetch(cfg.whTraiter,{method:'POST',headers:enTetesN8n(),
-      body:JSON.stringify({emailMessageId:c.id,ref:ctx.ref,utilisateur:moi()})});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    journaliser('PIECE|'+ctx.ref,'',[{cible:'Boîte compta',champ:'Email envoyé au worker',avant:'',
-      apres:(c.sujet||'').slice(0,120)}],'Email confirmé manuellement — pièce non lue');
-    toast('📤 Email transféré vers la boîte de lecture — l\'orchestrateur le prend en charge d\'ici 5 min, je surveille…',7000);
-    suivreUne(ctx.i,ctx.ref);}
-  catch(e){toast('⛔ '+e.message);}}
-async function suivreUne(i,ref){
-  const refN=numNorm(ref);const t0=Date.now();
-  while(Date.now()-t0<15*60000){
-    await new Promise(r=>setTimeout(r,30000));
-    try{await chargerFactures();}catch(e){continue;}
-    if(rows.some(f=>numNorm(f.NumeroFacture)===refN)){
-      toast('✅ '+ref+' — email retrouvé, facture lue par l\'IA');
-      rafraichirLignesFond();_rap=null;rendre();return;}
-    const b=document.getElementById('mb-'+i);
-    if(b)b.textContent='⏳ '+Math.max(1,Math.round((Date.now()-t0)/60000))+' min…';}
-  toast('📬 '+ref+' : rien après 15 min — email introuvable dans la boîte (ou lecture IA en échec, voir logs n8n). Reçue par courrier ou portail fournisseur ?',9000);
-  const b=document.getElementById('mb-'+i);
-  if(b){b.disabled=false;b.textContent='📬 Réessayer';}}
+function tabAnas(anas){
+  return `<h1 style="font-size:14px;margin-bottom:6px">Imputation analytique différente de Sage (${anas.length})</h1>
+   <div class="sous">Montants cohérents mais sections différentes — alerte seulement. Correction rapide : fiche → ↧ Appliquer à toutes les lignes, ou override fournisseur.</div>
+   <div class="twrap"><table><thead><tr><th>N° pièce</th><th>Fournisseur</th><th>Sections IA</th><th>Sections Sage</th><th></th></tr></thead><tbody>
+   ${anas.slice(0,150).map(y=>`<tr><td class="mono">${esc(y.x.g.r)}</td><td>${esc(y.x.f.Fournisseur||'—')}</td>
+     <td>${y.d.ia.map(sc=>`<span class="tag ${y.d.iaHors.includes(sc)?'o':'g'}" style="margin-right:3px">${esc(sc)}</span>`).join('')}</td>
+     <td>${y.d.sage.map(sc=>`<span class="tag g" style="margin-right:3px">${esc(sc)}</span>`).join('')}</td>
+     <td><button class="b" onclick="ouvrirFiche('${esc(y.x.f.CleUnique)}')">Ouvrir</button></td></tr>`).join('')
+    ||'<tr><td colspan="5" style="text-align:center;color:var(--g400);padding:18px">Aucune divergence d\'imputation 🎉</td></tr>'}
+   </tbody></table></div>`;}
 function analyserEcartIdx(i){const R=rapprocher();
   const x=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart))[i];
   if(x)analyserIA(x.f.CleUnique,{g:x.g,ecart:x.ecart});}
@@ -1488,7 +1434,6 @@ function rendreFiche(f,lg){
      ${rS!=null?gi(libRef()+' (Sage)'+(g&&g.refNorm!==numNorm(f.NumeroFacture)?' · pièce '+esc(g.r):''),fa(rS)+' €'):gi('Sage','non rapprochée')}
      ${ec!=null?gi('Écart',`<span class="${Math.abs(ec)<=0.02?'ecart-ok':'ecart-ko'}">${fa(ec)} €</span>`):''}
      ${g&&g.aux?gi('Tiers Sage (CT_Num)','<span class="mono">'+esc(g.aux)+'</span>'+(g.tiers?' · '+esc(g.tiers):'')):''}
-     ${g&&g.s488?gi('Agence Yooz (488) — fait foi à l\'import','<span class="mono" style="color:var(--vert);font-weight:700">'+esc(g.s488)+'</span>'):''}
    </div>
    ${c.ko.length?`<div class="alerte">⚠️ ${c.ko.map(esc).join(' · ')}</div>`:''}
    ${(c.warn||[]).length?`<div class="alerte" style="border-left-color:var(--orange);background:var(--orange-l);color:#7a5200">🟠 ${(c.warn||[]).map(esc).join(' · ')} — alerte seulement, n'empêche pas l'import</div>`:''}
