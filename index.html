@@ -236,6 +236,7 @@ const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${Str
 const fd=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'})};
 const fdh=s=>{if(!s)return'—';const d=new Date(s);return isNaN(d)?String(s):d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
 const dateFR=s=>{if(!s)return'';const[a,m,j]=String(s).slice(0,10).split('-');return`${j}/${m}/${a}`};
+const dateSage=s=>{if(!s)return'';const[a,m,j]=String(s).slice(0,10).split('-');return`${j}${m}${String(a).slice(2)}`};
 function toast(m,ms){const t=document.getElementById('toast');t.innerHTML=m;t.classList.add('on');
   clearTimeout(t._);t._=setTimeout(()=>t.classList.remove('on'),ms||3200);}
 function openMo(h,large){const m=document.getElementById('modale');m.innerHTML=h;
@@ -652,7 +653,7 @@ function libAuto(f,lg){
   if(!per){const d=String(f.DateFacture||'').slice(0,10);
     if(d)per=d.slice(5,7)+'/'+d.slice(0,4);}
   return (four+(per?' '+per:'')).slice(0,69);}
-const COLS='JOURNAL;Date comptable;N° de facture ;N° compte general;N° compte tiers;Libellé écriture;N° ;N° section ;Débit ;Crédit ;Type';
+const COLS='JOURNAL;Date comptable;N° de facture ;N° compte general;Libellé écriture;N° ;N° section ;Débit ;Crédit ;Type';
 function ecritures(c){
   const f=c.f,out=[];const dateC=(f.DateFacture||'').slice(0,10);
   const num=String(f.NumeroFacture||'').slice(0,30);
@@ -1113,10 +1114,10 @@ function previsualiser(){
   const lg=[];sel.forEach(c=>ecritures(c).forEach(e=>lg.push(e)));
   openMo(`<h3>👁 Prévisualisation — ${sel.length} facture(s), ${lg.length} ligne(s)</h3>
    <div class="sous">Exactement ce que contiendra le fichier. Ordre : 488600 au crédit, puis par compte la ligne générale (G) suivie de ses analytiques (A).</div>
-   <div class="twrap" style="max-height:55vh"><table><thead><tr><th>Jnl</th><th>Date</th><th>N° facture</th><th>Compte</th><th>Tiers</th><th>Section</th><th class="dr">Débit</th><th class="dr">Crédit</th><th>T</th></tr></thead><tbody>
+   <div class="twrap" style="max-height:55vh"><table><thead><tr><th>Jnl</th><th>Date</th><th>N° facture</th><th>Compte</th><th>Section</th><th class="dr">Débit</th><th class="dr">Crédit</th><th>T</th></tr></thead><tbody>
    ${lg.map(e=>`<tr style="${e.cpt===cfg.compte488?'background:var(--bleu-l)':e.typ==='A'?'background:var(--g50)':''}">
      <td>${esc(e.j)}</td><td>${dateFR(e.d)}</td><td class="mono">${esc(e.n)}</td><td class="mono">${esc(e.cpt)}</td>
-     <td class="mono">${esc(e.tiers)}</td><td class="mono">${esc(e.sec)}</td>
+     <td class="mono">${esc(e.sec)}</td>
      <td class="dr">${e.deb?fa(e.deb):''}</td><td class="dr">${e.cre?fa(e.cre):''}</td><td><b>${e.typ}</b></td></tr>`).join('')}
    </tbody></table></div>
    <div style="text-align:right;margin-top:12px"><button class="b" onclick="closeMo()">Fermer</button>
@@ -1131,7 +1132,7 @@ function genererLot(sel,apres){
     (Math.abs(t.deb-refT)<0.005?'Bouclage exact au centime. Générer ?':'⚠️ ÉCART NON NUL — vérifiez avant d\'importer. Générer quand même ?')))
     {toast('Génération annulée');return;}
   const lg=[];sel.forEach(c=>ecritures(c).forEach(e=>lg.push(
-    [e.j,dateFR(e.d),e.n,e.cpt,e.tiers,e.lib,e.st,e.sec,
+    [e.j,dateSage(e.d),e.n,e.cpt,e.lib,e.st,e.sec,
      e.deb?e.deb.toFixed(2).replace('.',','):'',e.cre?e.cre.toFixed(2).replace('.',','):'',e.typ]
     .map(v=>String(v??'').replace(/[\t\r\n]+/g,' ')).join('\t'))));
   const id='IMP-'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
