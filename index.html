@@ -705,7 +705,22 @@ async function retraiter(cles,motif,contexte){
     toast('🔄 '+fs.length+' facture(s) renvoyée(s) à l\'IA');return true;}
   catch(e){toast('⚠️ Retraitement : '+e.message);return false;}}
 
-async function analyserIA(cle,ctx){
+function demanderAnalyse(cle,ctx){
+  const f=rows.find(r=>r.CleUnique===cle);if(!f)return;
+  window._anaCtx={cle,ctx};
+  openMo(`<h3>🔎 Analyse IA — ${esc(f.NumeroFacture||'')}</h3>
+   <div class="sous">${esc(f.Fournisseur||'')} · l'IA relit le PDF avec la consigne fournisseur actuelle et la doctrine du lecteur</div>
+   <div class="lab" style="margin-bottom:3px">Votre observation ou question (facultatif — oriente l'analyse)</div>
+   <textarea id="ana-obs" style="width:100%;min-height:85px;font-size:12.5px"
+     placeholder="Ex. : je ne comprends pas pourquoi cette ligne passe en traitement alors que c'est de la rotation"></textarea>
+   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+     <button class="b" onclick="closeMo()">Annuler</button>
+     <button class="b principal" onclick="lancerAnalyse()">🔎 Lancer l'analyse</button></div>`,true);}
+function lancerAnalyse(){
+  const o=(document.getElementById('ana-obs')||{}).value||'';
+  const c=window._anaCtx||{};
+  return analyserIA(c.cle,c.ctx,o);}
+async function analyserIA(cle,ctx,observation){
   const f=rows.find(r=>r.CleUnique===cle);if(!f)return;
   openMo(`<h3>🔎 Analyse de l'écart</h3><div class="sous">${esc(f.Fournisseur)} — ${esc(f.NumeroFacture)}</div>
     <div class="chargeur"><span class="spin"></span>L'IA lit la facture et compare à Sage…</div>`,true);
@@ -722,28 +737,48 @@ async function analyserIA(cle,ctx){
     sage:ctx&&ctx.g?{ttc:ctx.g.ttc,ht:ctx.g.ht,a488:ctx.g.a,comptes:ctx.g.comptes,sections:ctx.g.sections}:null,
     ecart:ctx?ctx.ecart:null,
     consigneActuelle:consigne?{id:consigne._id,motif:consigne.motif,texte:consigne.texte}:null,
+    observation:String(observation||'').trim(),
     utilisateur:moi()};
   try{const r=await fetch(cfg.whAnalyse,{method:'POST',headers:enTetesN8n(),body:JSON.stringify(corps)});
     const txt=await r.text();if(!r.ok)throw new Error('HTTP '+r.status);
     let d;try{d=JSON.parse(txt)}catch(e){d={diagnostic:txt}}
     if(Array.isArray(d))d=d[0]||{};if(d.output)d=d.output;
+    window._propWorker=String(d.modificationWorker||'');
     openMo(`<h3>🔎 Analyse de l'écart</h3>
       <div class="sous">${esc(f.Fournisseur)} — ${esc(f.NumeroFacture)}
         ${f.LienFacture?` · <a href="${esc(f.LienFacture)}" target="_blank">PDF</a>`:''}</div>
+      ${corps.observation?`<div style="border-left:3px solid var(--violet);background:var(--violet-l);padding:7px 11px;border-radius:0 7px 7px 0;font-size:12px;margin-bottom:10px"><b>Votre question :</b> ${esc(corps.observation)}</div>`:''}
       <div style="margin-bottom:10px"><b>Diagnostic</b> ${d.confiance?`<span class="tag ${d.confiance>=0.8?'v':'o'}">confiance ${Math.round(d.confiance*100)} %</span>`:''}
         <div style="white-space:pre-wrap;font-size:13px;margin-top:4px">${esc(d.diagnostic||'—')}</div></div>
       ${d.lignesManquantes?`<div style="margin-bottom:10px"><b style="color:var(--rouge)">Lignes manquantes repérées</b>
         <div style="white-space:pre-wrap;font-size:12.5px">${esc(d.lignesManquantes)}</div></div>`:''}
-      ${d.consigneProposee?`<div style="border:1px solid #a7d9be;border-radius:8px;overflow:hidden;margin-top:8px">
-        <div style="background:var(--vert-l);color:var(--vert);font-weight:600;font-size:12px;padding:7px 11px">💡 Consigne proposée${d.consigneEstAmelioration?" (améliore l'existante)":""}</div>
-        <div style="padding:10px"><textarea id="ana-txt" style="width:100%;min-height:70px">${esc(d.consigneProposee)}</textarea>
-        <div style="text-align:right;margin-top:6px">
-          <button class="b principal" onclick='appliquerConsigne(${JSON.stringify(consigne?consigne._id:null)},${JSON.stringify((f.Fournisseur||'').split(' ')[0])},${JSON.stringify(String(f.SIRET||'').slice(0,9))})'>✅ Appliquer dans les consignes</button>
-        </div></div></div>`:''}
+      ${d.consigneProposee?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div style="border:1px solid var(--g200);border-radius:8px;overflow:hidden">
+          <div style="background:var(--g50);color:var(--g500);font-weight:600;font-size:12px;padding:7px 11px">Consigne actuelle${consigne?'':' — aucune'}</div>
+          <div style="padding:10px;font-size:12px;white-space:pre-wrap;max-height:220px;overflow:auto;color:var(--g700)">${esc(consigne&&consigne.texte?consigne.texte:'(vide)')}</div></div>
+        <div style="border:1.5px solid var(--vert);border-radius:8px;overflow:hidden">
+          <div style="background:var(--vert-l);color:var(--vert);font-weight:600;font-size:12px;padding:7px 11px">💡 Consigne proposée — COMPLÈTE, remplacera l'actuelle${d.consigneEstAmelioration?'':' (nouvelle)'}</div>
+          <div style="padding:10px"><textarea id="ana-txt" style="width:100%;min-height:180px;font-size:12px">${esc(d.consigneProposee)}</textarea>
+          <div style="text-align:right;margin-top:6px">
+            <button class="b principal" onclick='appliquerConsigne(${JSON.stringify(consigne?consigne._id:null)},${JSON.stringify((f.Fournisseur||'').split(' ')[0])},${JSON.stringify(String(f.SIRET||'').slice(0,9))})'>✅ Mettre à jour la consigne</button>
+          </div></div></div></div>`:''}
+      ${d.modificationWorker?`<div style="border:1.5px solid var(--violet);border-radius:8px;overflow:hidden;margin-top:10px">
+        <div style="background:var(--violet-l);color:var(--violet);font-weight:600;font-size:12px;padding:7px 11px">🛠 Correctif côté WORKER (doctrine globale) — à transmettre à l'administrateur, pas une consigne fournisseur</div>
+        <div style="padding:10px;font-size:12.5px;white-space:pre-wrap">${esc(d.modificationWorker)}</div>
+        <div style="text-align:right;padding:0 10px 10px">
+          <button class="b" onclick='copierPropositionWorker(${JSON.stringify(String(f.NumeroFacture||''))})'>📋 Copier la proposition pour l'administrateur</button>
+        </div></div>`:''}
       ${d.autresPistes?`<div style="margin-top:10px;font-size:12px;color:var(--g500)"><b>Autres pistes :</b> ${esc(d.autresPistes)}</div>`:''}
       <div style="text-align:right;margin-top:14px"><button class="b" onclick="closeMo()">Fermer</button></div>`,true);}
   catch(e){openMo(`<h3>🔎 Analyse de l'écart</h3><div class="alerte">⚠️ ${esc(e.message)} — vérifiez le webhook dans ⚙️ Paramètres et que le workflow n8n est actif.</div>
     <div style="text-align:right"><button class="b" onclick="closeMo()">Fermer</button></div>`);}}
+async function copierPropositionWorker(numFacture){
+  const txt=window._propWorker||'';
+  try{await navigator.clipboard.writeText('Proposition de modification du WORKER (analyse IA — facture '+numFacture+') :\n\n'+txt);
+    toast('📋 Proposition copiée — à coller dans un message à l\'administrateur');}
+  catch(e){toast('⚠️ Copie impossible ('+e.message+') — sélectionnez le texte à la main');}
+  journaliser('WORKER','',[{cible:'Worker (doctrine globale)',champ:'Proposition de modification',
+    avant:'',apres:txt.slice(0,255)}],'Analyse IA — facture '+numFacture+' — à transmettre à l\'administrateur');}
 async function appliquerConsigne(id,motifDefaut,siren){
   const texte=document.getElementById('ana-txt')?.value||'';closeMo();
   if(!consignes)await chargerConsignes();
@@ -946,7 +981,7 @@ async function suivreUne(i,ref){
   if(b){b.disabled=false;b.textContent='📬 Réessayer';}}
 function analyserEcartIdx(i){const R=rapprocher();
   const x=R.ecarts.slice().sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart))[i];
-  if(x)analyserIA(x.f.CleUnique,{g:x.g,ecart:x.ecart});}
+  if(x)demanderAnalyse(x.f.CleUnique,{g:x.g,ecart:x.ecart});}
 function retraiterFournisseur(four){
   window._rfFour=four;
   openMo(`<h3>🔄 Relire les factures de « ${esc(four)} »</h3>
@@ -1570,7 +1605,7 @@ function recapEcriture(cand){
 function analyserFiche(cle){
   const R=sage&&lignes?rapprocher():null;
   const x=R?(R.ecarts.find(y=>y.f.CleUnique===cle)||R.ok.find(y=>y.f.CleUnique===cle)):null;
-  analyserIA(cle,x?{g:x.g,ecart:x.ecart||0}:null);}
+  demanderAnalyse(cle,x?{g:x.g,ecart:x.ecart||0}:null);}
 function majEntete(champ,val){
   const f=window._ficheF;if(!f)return;
   const apres=['TotalTTC','TotalHT','TVA'].includes(champ)?pa(val):val;
